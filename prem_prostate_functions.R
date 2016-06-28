@@ -24,7 +24,7 @@ source('/ifs/data/c2b2/ac_lab/dt2539/projects/pipelines/prem_prostate/pipeline/p
 
 make_design_table <- function(infile, outfile)
 {
-	# Load libraries
+	# Load libraries test
 	require(gdata)
 
 	# Read infiles
