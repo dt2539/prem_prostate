@@ -131,7 +131,11 @@ merge_su2c_regulons <- function(infiles, outfile)
 #############################################
 
 run_msviper <- function(infiles, outfile)
-{
+{	
+	# rm(list=ls())
+	# source('/ifs/data/c2b2/ac_lab/dt2539/projects/pipelines/prem_prostate/pipeline/prem_prostate_support.R')
+	# infiles <-c('f1-data.dir/prem_prostate-vst.rda', 'f1-data.dir/design_table.txt', 'f2-msviper.dir/su2c-merged_regulon.rda')
+	# outfile <- 'f2-msviper.dir/prem_prostate-msviper.rda'
 	# Load libraries
 	library(viper)
 	library(citrus)
@@ -141,12 +145,23 @@ run_msviper <- function(infiles, outfile)
 	design_df <- tread(infiles[2])
 	load(infiles[3])
 	
-	# Load e2s	
+	# Fix rownames	
 	rownames(vsd_df) <- s2e(rownames(vsd_df))
 
-	# Select comparisons
-	comparisons <- c('LNCaPvLNCaP_RESIDUAL', 'LNCaP_RESIDUALvLNCaP_R-CLONES', 'LNCaPvLNCaP_R-CLONES')
+	# Remove DMSO samples
+	design_df <- design_df[!grepl('DMSO', design_df$drug),]
 
+	# Get groups of interest
+	group_labels <- c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_R-CLONES--27_DAYS', 'LNCaP_RESIDUAL--27_DAYS')
+
+	# Get groups
+	groups <- sapply(group_labels, function(x) { cond <- strsplit(x, '--')[[1]];
+												 wells <- design_df[(design_df$cell_line == cond[1] & design_df$days == cond[2]), 'well'];
+												 return(wells) })
+
+	# Select comparisons
+	comparisons <- c('LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--10_DAYSvLNCaP_R-CLONES--27_DAYS', 'LNCaP_RESIDUAL--10_DAYSvLNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS')
+# comparison='LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS'
 	# Define result list
 	msviper_results <- list()
 
@@ -154,11 +169,12 @@ run_msviper <- function(infiles, outfile)
 	for (comparison in comparisons)
 	{
 		# Get pair
+		message('\nDoing ', comparison, ' ...')
 		pair <- strsplit(comparison, 'v')[[1]]
 
 		# Get samples
-		samples1 <- design_df$well[design_df$cell_line == pair[1]]
-		samples2 <- design_df$well[design_df$cell_line == pair[2]]
+		samples1 <- groups[[pair[1]]]
+		samples2 <- groups[[pair[2]]]
 
 		# Get matrices
 		expmat1 <- vsd_df[,samples1]
