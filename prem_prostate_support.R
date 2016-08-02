@@ -40,7 +40,31 @@ get_table_xy <- function(n, ncol)
     return(coord_df)
 }
 
+#######################################################
+#######################################################
+########## S2. Specific support
+#######################################################
+#######################################################
 
+#############################################
+########## 2.1 (2.4) Get enrichment
+#############################################
+
+get_pathway_enrichment <- function(geneset, pathway_genes, background)
+{
+    # Get binary table
+    binary_table <- data.frame(in_geneset = sapply(background, function(x) x %in% geneset),
+                               in_pathway = sapply(background, function(x) x %in% pathway_genes))
+
+    # Get contingency table
+    contingency_table <- table(binary_table)
+
+    # Run Fisher's test
+    fisher_test_results <- tryCatch(fisher.test(contingency_table), error=function(x) NA)
+
+    # Return result
+    return(fisher_test_results)
+}
 
 
 #######################################################

@@ -34,6 +34,7 @@ def run(function, infiles, outfile, makedir=False, qsub=True, mem='8000M', nodes
 ########## 3. General setup
 #############################################
 ##### 1. Default variables #####
+msigdbGenesets = '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f1-genelists.dir/msigdb-genesets.rda'
 
 
 #######################################################
@@ -112,12 +113,30 @@ def mergeSu2cRegulons(infiles, outfile):
 
 ### Purpose: Run msVIPER.
 
-@files((vstRawcountTable, makeDesignTable, mergeSu2cRegulons),
-	   'f2-msviper.dir/prem_prostate-msviper.rda')
+def msviperJobs():
+	# Set comparisons
+	comparisons = ['LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS',
+				   'LNCaP_RESIDUAL--10_DAYSvLNCaP_R-CLONES--27_DAYS',
+				   'LNCaP_RESIDUAL--10_DAYSvLNCaP_RESIDUAL--27_DAYS',
+				   'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS',
+				   'LNCaP--10_DAYSvLNCaP_RESIDUAL--27_DAYS',
+				   'LNCaP--10_DAYSvLNCaP_R-CLONES--27_DAYS']
+	# Set infiles
+	infiles = ['f1-data.dir/prem_prostate-vst.rda',
+			   'f1-data.dir/design_table.txt',
+			   'f2-msviper.dir/su2c-merged_regulon.rda']
+	# Loop through comparisons
+	for comparison in comparisons:
+		outfile = 'f2-msviper.dir/msviper_runs/%(comparison)s.rda' % locals()
+		yield [infiles, outfile]
+
+@follows(mkdir('f2-msviper.dir/msviper_runs/'))
+
+@files(msviperJobs)
 
 def runMsViper(infiles, outfile):
 
-	run('run_msviper', infiles, outfile)
+	run('run_msviper', infiles, outfile, mem='32G')
 
 #############################################
 ########## 3. Get NES table
@@ -125,18 +144,42 @@ def runMsViper(infiles, outfile):
 
 ### Purpose: Get msVIPER NES results table.
 
-@transform('f2-msviper.dir/prem_prostate-msviper_100.rda',
-		   suffix('.rda'),
-		   '.txt')
+@merge(runMsViper,
+	   'f2-msviper.dir/prem_prostate-msviper_table.rda')
 
-def getNesTable(infile, outfile):
+def getNesTable(infiles, outfile):
 
-	run('get_nes_table', infile, outfile)
+	run('get_nes_table', infiles, outfile)
+
+#############################################
+########## 4. Get significant gene list
+#############################################
+
+@transform(getNesTable,
+		   suffix('table.rda'),
+		   'significant_genes.rda')
+
+def getSignificantGenes(infile, outfile):
+
+	run('get_significant_genes', infile, outfile)
+
+#############################################
+########## 5. Get pathway enrichment
+#############################################
+
+@transform(getSignificantGenes,
+		   suffix('s.rda'),
+		   add_inputs(getNesTable, msigdbGenesets),
+		   '_enrichment.rda')
+
+def getPathwayEnrichment(infiles, outfile):
+
+	run('get_pathway_enrichment', infiles, outfile)
 
 
 #######################################################
 #######################################################
-########## S. 
+########## . 
 #######################################################
 #######################################################
 

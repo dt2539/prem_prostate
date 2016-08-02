@@ -131,11 +131,7 @@ merge_su2c_regulons <- function(infiles, outfile)
 #############################################
 
 run_msviper <- function(infiles, outfile)
-{	
-	# rm(list=ls())
-	# source('/ifs/data/c2b2/ac_lab/dt2539/projects/pipelines/prem_prostate/pipeline/prem_prostate_support.R')
-	# infiles <-c('f1-data.dir/prem_prostate-vst.rda', 'f1-data.dir/design_table.txt', 'f2-msviper.dir/su2c-merged_regulon.rda')
-	# outfile <- 'f2-msviper.dir/prem_prostate-msviper.rda'
+{
 	# Load libraries
 	library(viper)
 	library(citrus)
@@ -152,46 +148,24 @@ run_msviper <- function(infiles, outfile)
 	design_df <- design_df[!grepl('DMSO', design_df$drug),]
 
 	# Get groups of interest
-	group_labels <- c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_R-CLONES--27_DAYS', 'LNCaP_RESIDUAL--27_DAYS')
+	group_labels <- strsplit(basename(substr(outfile, 1, nchar(outfile)-4)), 'v')[[1]]
 
 	# Get groups
-	groups <- sapply(group_labels, function(x) { cond <- strsplit(x, '--')[[1]];
+	groups <- lapply(group_labels, function(x) { cond <- strsplit(x, '--')[[1]];
 												 wells <- design_df[(design_df$cell_line == cond[1] & design_df$days == cond[2]), 'well'];
 												 return(wells) })
 
-	# Select comparisons
-	comparisons <- c('LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--10_DAYSvLNCaP_R-CLONES--27_DAYS', 'LNCaP_RESIDUAL--10_DAYSvLNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS')
-# comparison='LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS'
-	# Define result list
-	msviper_results <- list()
+	# Get matrices
+	expmats <- lapply(groups, function(x) vsd_df[,x])
+
+	# Run t-tests
+	sig <- rowTtest(x=expmats[[1]], y=expmats[[2]])
+	dnull <- ttestNull(x=expmats[[1]], y=expmats[[2]], per = 10000)
 
 	# Run msVIPER
-	for (comparison in comparisons)
-	{
-		# Get pair
-		message('\nDoing ', comparison, ' ...')
-		pair <- strsplit(comparison, 'v')[[1]]
-
-		# Get samples
-		samples1 <- groups[[pair[1]]]
-		samples2 <- groups[[pair[2]]]
-
-		# Get matrices
-		expmat1 <- vsd_df[,samples1]
-		expmat2 <- vsd_df[,samples2]
-
-		# Run t-tests
-		sig <- rowTtest(x=expmat1, y=expmat2)
-		dnull <- ttestNull(x=expmat1, y=expmat2, per = 1000)
-
-		# Run msVIPER
-		good_genes <- rownames(dnull)[complete.cases(dnull)]
-		mra <- msviper(sig$statistic[good_genes,], regulon, dnull[good_genes,])
-		mrannot <- msviperAnnot(mra, list_eg2symbol)
-
-		# Save to result list
-		msviper_results[[comparison]] <- mrannot
-	}
+	good_genes <- rownames(dnull)[complete.cases(dnull)]
+	mra <- msviper(sig$statistic[good_genes,], regulon, dnull[good_genes,])
+	msviper_results <- msviperAnnot(mra, list_eg2symbol)
 
 	# Save data
 	save(msviper_results, file=outfile)
@@ -201,27 +175,145 @@ run_msviper <- function(infiles, outfile)
 ########## 3. Get NES table
 #############################################
 
-get_nes_table <- function(infile, outfile)
+get_nes_table <- function(infiles, outfile)
 {
-	# Load infile
-	load(infile)
+	# Get NES data
+	nes_data <- lapply(infiles, function(x) { load(x);
+											  label <- strsplit(basename(x), '.', fixed=TRUE)[[1]][1]
+											  nes <- msviper_results$es$nes
+											  nes_table <- data.frame(gene_id = as.character(names(nes)),
+											  						  nes = nes,
+											  						  comparison = as.character(label))
+											  return(nes_table)})
 
-	# Get NES values
-	nes_values <- sapply(msviper_results, function(x) x$es$nes)
+	# Get NES table
+	nes_table <- do.call('rbind', nes_data)
 
-	# Make melted table list
-	nes_table_list <- lapply(names(nes_values), function(x) data.frame(gene_id=names(nes_values[[x]]),
-																  NES = nes_values[[x]],
-																  comparison = x))
+	# Cast it
+	nes <- cast(gene_id ~ comparison, data=nes_table, value='nes')
 
-	# Make melted table
-	nes_table_merge <- rbind(nes_table_list[[1]], nes_table_list[[2]], nes_table_list[[3]])
-
-	# Cast
-	nes_table <- cast(gene_id ~ comparison, data=nes_table_merge, value=c('NES'))
+	# Fix row names
+	rownames(nes) <- nes$gene_id
+	nes$gene_id <- NULL
 
 	# Save table
-	twrite(nes_table, outfile)
+	save(nes, file=outfile)
+}
+
+#############################################
+########## 4. Get significant gene list
+#############################################
+
+get_significant_genes <- function(infile, outfile)
+{
+	# Load infiles
+	load(infile)
+
+	# Get complete cases
+	nes <- -nes[complete.cases(nes),]
+
+	# Set p threshold
+	p_threshold <- 0.01
+
+	# Get VIPER genelists
+	significant_genes <- list()
+
+	# Loop through comparisons
+	for (comparison in colnames(nes))
+	{
+		for (sign in c('up', 'down'))
+		{
+			# Set label
+			label <- paste(comparison, sign, sep='__')
+
+			# Add results
+			significant_genes[[label]] <- switch(sign,
+											   'up' = rownames(nes)[nes[,comparison] > citrus::p2z(p_threshold)],
+											   'down' = rownames(nes)[nes[,comparison] < -citrus::p2z(p_threshold)])
+		}
+	}
+
+	# Save results
+	save(significant_genes, file=outfile)
+}
+
+#############################################
+########## 5. Get pathway enrichment
+#############################################
+
+get_pathway_enrichment <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load infiles
+	load(infiles[1])
+	load(infiles[2])
+	load(infiles[3])
+
+	# Get background
+	background <- s2e(rownames(nes))
+
+	# Intersect with background
+	msigdb_genesets_filtered <- sapply(msigdb_genesets, function(x) intersect(x, background))
+
+	# Filter by size
+	geneset_size <- sapply(msigdb_genesets_filtered, length)
+	msigdb_genesets_filtered <- msigdb_genesets_filtered[names(geneset_size)[geneset_size > 30]]
+
+	# Convert gene IDs
+	significant_genes <- sapply(significant_genes, function(x) s2e(x))
+
+	# Define fisher test result list
+	fisher_results <- list()
+
+	get_pathway_enrichment <- function(geneset, pathway_genes, background)
+	{
+	    # Get binary table
+	    binary_table <- data.frame(in_geneset = sapply(background, function(x) x %in% geneset),
+	                               in_pathway = sapply(background, function(x) x %in% pathway_genes))
+
+	    # Get contingency table
+	    contingency_table <- table(binary_table)
+
+	    # Run Fisher's test
+	    fisher_test_results <- tryCatch(fisher.test(contingency_table), error=function(x) NA)
+
+	    # Return result
+	    return(fisher_test_results)
+	}
+
+
+
+	# Loop through genesets
+	for (geneset_name in names(msigdb_genesets_filtered))
+	{
+		for (comparison_name in names(significant_genes))
+		{
+			# Get label
+			label <- paste(geneset_name, comparison_name, sep='___')
+
+			# Run fisher test
+			fisher_results[[label]] <- get_pathway_enrichment(geneset = significant_genes[[comparison_name]],
+													 		  pathway_genes = msigdb_genesets_filtered[[geneset_name]],
+															  background = background)
+		}
+	}
+
+	# Get pvalues
+	pvalues <- data.frame(p=sapply(fisher_results, function(x) x$p.value))
+	pvalues$hallmark <- sapply(rownames(pvalues), function(x) strsplit(x, '___')[[1]][1])
+	pvalues$comparison <- sapply(rownames(pvalues), function(x) strsplit(x, '___')[[1]][2])
+	pvalues$FDR <- p.adjust(pvalues$p, method='BH')
+	pvalues$z <- p2z(pvalues$p)
+
+	# Cast table
+	zscore_table <- reshape::cast(comparison ~ hallmark, data=pvalues, value='z', fill=1)
+	rownames(zscore_table) <- zscore_table$comparison
+	zscore_table$comparison <- NULL
+
+	# Save results
+	save(zscore_table, fisher_results, file=outfile)
 }
 
 #######################################################
