@@ -161,10 +161,22 @@ def getNesTable(infiles, outfile):
 
 def getSignificantGenes(infile, outfile):
 
-	run('get_significant_genes', infile, outfile)
+	run('get_significant_genes', infile, outfile, qsub=False)
 
 #############################################
-########## 5. Get pathway enrichment
+########## 5. Get significant gene table
+#############################################
+
+@transform(getSignificantGenes,
+		   suffix('.rda'),
+		   '.txt')
+
+def getSignificantGeneTable(infile, outfile):
+
+	run('get_significant_gene_table', infile, outfile)
+
+#############################################
+########## 6. Get pathway enrichment
 #############################################
 
 @transform(getSignificantGenes,
@@ -174,8 +186,20 @@ def getSignificantGenes(infile, outfile):
 
 def getPathwayEnrichment(infiles, outfile):
 
-	run('get_pathway_enrichment', infiles, outfile)
+	run('get_pathway_enrichment', infiles, outfile, printfiles=True)
 
+#############################################
+########## 7. Get resistance genes
+#############################################
+
+@transform(getSignificantGenes,
+		   suffix('significant_genes.rda'),
+		   add_inputs(getNesTable),
+		   'resistance_genes.rda')
+
+def getResistanceGenes(infiles, outfile):
+
+	run('get_resistance_genes', infiles, outfile, printfiles=True)
 
 #######################################################
 #######################################################

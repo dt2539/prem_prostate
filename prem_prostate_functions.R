@@ -177,6 +177,9 @@ run_msviper <- function(infiles, outfile)
 
 get_nes_table <- function(infiles, outfile)
 {
+	# Load libraries
+	library(citrus)
+
 	# Get NES data
 	nes_data <- lapply(infiles, function(x) { load(x);
 											  label <- strsplit(basename(x), '.', fixed=TRUE)[[1]][1]
@@ -190,11 +193,20 @@ get_nes_table <- function(infiles, outfile)
 	nes_table <- do.call('rbind', nes_data)
 
 	# Cast it
-	nes <- cast(gene_id ~ comparison, data=nes_table, value='nes')
+	nes <- reshape2::dcast(gene_id ~ comparison, data=nes_table, value.var='nes')
 
 	# Fix row names
 	rownames(nes) <- nes$gene_id
 	nes$gene_id <- NULL
+
+	# Remove NA
+	nes_filter <- as.matrix(nes[complete.cases(nes),])
+
+	# Adjust p-values
+	nes <- apply(nes_filter, 2, function(x) p2z(p.adjust(z2p(x), method='BH'))*sign(x))
+
+	# Fix rownames
+	rownames(nes) <- rownames(nes_filter)
 
 	# Save table
 	save(nes, file=outfile)
@@ -209,11 +221,11 @@ get_significant_genes <- function(infile, outfile)
 	# Load infiles
 	load(infile)
 
-	# Get complete cases
-	nes <- -nes[complete.cases(nes),]
+	# Fix sign
+	nes <- -nes
 
 	# Set p threshold
-	p_threshold <- 0.01
+	p_threshold <- 0.05
 
 	# Get VIPER genelists
 	significant_genes <- list()
@@ -235,6 +247,28 @@ get_significant_genes <- function(infile, outfile)
 
 	# Save results
 	save(significant_genes, file=outfile)
+}
+
+#############################################
+########## 5. Get significant gene table
+#############################################
+
+get_significant_gene_table <- function(infile, outfile)
+{
+	# Load infile
+	load(infile)
+
+	# Get max length of sets
+	max_length <- max(sapply(significant_genes, length))
+
+	# Get updated list
+	significant_gene_table <- sapply(names(significant_genes), function(x) {genes <- significant_genes[[x]];
+																		    genes <- c(genes, rep('', max_length-length(genes)));
+																		    names(genes) <- rep(x, length(genes));
+																		    return(genes) })
+
+	# Save table
+	twrite(significant_gene_table, outfile)
 }
 
 #############################################
@@ -301,19 +335,40 @@ get_pathway_enrichment <- function(infiles, outfile)
 	}
 
 	# Get pvalues
-	pvalues <- data.frame(p=sapply(fisher_results, function(x) x$p.value))
+	pvalues <- data.frame(p=sapply(fisher_results, function(x) tryCatch(x$p.value, error=function(x) 1)))
 	pvalues$hallmark <- sapply(rownames(pvalues), function(x) strsplit(x, '___')[[1]][1])
 	pvalues$comparison <- sapply(rownames(pvalues), function(x) strsplit(x, '___')[[1]][2])
 	pvalues$FDR <- p.adjust(pvalues$p, method='BH')
 	pvalues$z <- p2z(pvalues$p)
 
 	# Cast table
-	zscore_table <- reshape::cast(comparison ~ hallmark, data=pvalues, value='z', fill=1)
+	zscore_table <- reshape2::dcast(comparison ~ hallmark, data=pvalues, value.var='z', fill=1)
 	rownames(zscore_table) <- zscore_table$comparison
 	zscore_table$comparison <- NULL
 
 	# Save results
 	save(zscore_table, fisher_results, file=outfile)
+}
+
+#############################################
+########## 6. Get resistance genes
+#############################################
+
+get_resistance_genes <- function(infiles, outfile)
+{
+	# Load infile
+	load(infiles[1])
+	load(infiles[2])
+
+	# Get resistance genes
+	resistance_genes <- setdiff(significant_genes[['LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS__down']],
+								significant_genes[['LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS__down']])
+
+	# Get NES
+	resistance_gene_nes <- sort(nes[resistance_genes, 'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS'])
+
+
+
 }
 
 #######################################################

@@ -122,7 +122,7 @@ library(citrus)
 # Load data
 load(infiles[1])
 load(infiles[2])
-nes <- nes[complete.cases(nes),]
+nes <- -nes[complete.cases(nes),]
 colnames(zscore_table) <- gsub('HALLMARK_', '', colnames(zscore_table))
 zscore_table <- zscore_table[c(4, 3, 12, 11, 10, 9), c('MYC_TARGETS_V1','E2F_TARGETS','G2M_CHECKPOINT','DNA_REPAIR','APICAL_JUNCTION')]
 colnames(zscore_table) <- gsub('_', ' ', colnames(zscore_table))
@@ -133,7 +133,7 @@ groups <- c('LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--10_DAYSvL
 labels <- setNames(groups, nicenames(groups))
 
 # Count significant genes
-counts <- apply(nes, 2, function(x) c(sum(x > p2z(0.01)), sum(x < -p2z(0.01))))
+counts <- apply(nes, 2, function(x) c(sum(x > p2z(0.05)), sum(x < -p2z(0.05))))
 
 # Make plot
 png(outfile, height=500, width=1000)
@@ -198,7 +198,7 @@ for (i in 1:length(arrow_opts))
 }
 
 # Key
-squash::hkey(enrich.cmap, 'Enrichment Z-score', x=0, y=-0.45, skip=10)
+squash::hkey(enrich.cmap, 'Geneset Enrichment Z-score', x=0, y=-0.45, skip=10)
 
 # Add title
 mtext('Androgen Deprivation of LNCaP - msVIPER Analysis', cex=2)
