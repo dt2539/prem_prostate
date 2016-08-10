@@ -36,6 +36,14 @@ def run(function, infiles, outfile, makedir=False, qsub=True, mem='8000M', nodes
 ##### 1. Default variables #####
 msigdbGenesets = '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f1-genelists.dir/msigdb-genesets.rda'
 
+##### 2. Other variables #####
+# Set comparisons
+comparisons = ['LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS',
+			   'LNCaP_RESIDUAL--10_DAYSvLNCaP_R-CLONES--27_DAYS',
+			   'LNCaP_RESIDUAL--10_DAYSvLNCaP_RESIDUAL--27_DAYS',
+			   'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS',
+			   'LNCaP--10_DAYSvLNCaP_RESIDUAL--27_DAYS',
+			   'LNCaP--10_DAYSvLNCaP_R-CLONES--27_DAYS']
 
 #######################################################
 #######################################################
@@ -114,13 +122,6 @@ def mergeSu2cRegulons(infiles, outfile):
 ### Purpose: Run msVIPER.
 
 def msviperJobs():
-	# Set comparisons
-	comparisons = ['LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS',
-				   'LNCaP_RESIDUAL--10_DAYSvLNCaP_R-CLONES--27_DAYS',
-				   'LNCaP_RESIDUAL--10_DAYSvLNCaP_RESIDUAL--27_DAYS',
-				   'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS',
-				   'LNCaP--10_DAYSvLNCaP_RESIDUAL--27_DAYS',
-				   'LNCaP--10_DAYSvLNCaP_R-CLONES--27_DAYS']
 	# Set infiles
 	infiles = ['f1-data.dir/prem_prostate-vst.rda',
 			   'f1-data.dir/design_table.txt',
@@ -200,6 +201,47 @@ def getPathwayEnrichment(infiles, outfile):
 def getResistanceGenes(infiles, outfile):
 
 	run('get_resistance_genes', infiles, outfile, printfiles=True)
+
+#######################################################
+#######################################################
+########## 3. Differential expression
+#######################################################
+#######################################################
+
+#############################################
+########## 3.1 Run edgeR normalization
+#############################################
+
+@follows(mkdir('f3-differential_expression.dir/de_runs'))
+
+@files((makeDesignTable, makeRawcountTable),
+	   'f3-differential_expression.dir/prem_prostate-voom.rda')
+
+def runVoom(infiles, outfile):
+
+	run('run_voom', infiles, outfile)
+
+#############################################
+########## 3.2 Run differential expression
+#############################################
+
+def deJobs():
+	# Set infiles
+	infile = 'f3-differential_expression.dir/prem_prostate-voom.rda'
+	# Loop through comparisons
+	for comparison in comparisons:
+		outfile = 'f3-differential_expression.dir/de_runs/%(comparison)s.rda' % locals()
+		yield [infile, outfile]
+
+@files(deJobs)
+
+def runDifferentialExpression(infile, outfile):
+
+	run('run_differential_expression', infile, outfile, printfiles=True)
+
+##############################
+##### .
+##############################
 
 #######################################################
 #######################################################

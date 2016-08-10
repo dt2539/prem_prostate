@@ -189,8 +189,9 @@ for (i in 1:length(arrow_opts))
 	opt <- arrow_opts[[i]]
 
 	# Plot colors
-	points(x=rep(pos[1]+opt[1], nrow(zscore_colors)), y=seq(pos[1]+opt[2]-0.1, pos[1]+opt[2]+0.23, length.out=nrow(zscore_colors)), pch=22, bg=zscore_colors[,i], cex=3.5)
-	points(x=rep(pos[1]+opt[1]+s, nrow(zscore_colors)), y=seq(pos[1]+opt[2]-0.1, pos[1]+opt[2]+0.23, length.out=nrow(zscore_colors)), pch=22, bg=zscore_colors[,i+1], cex=3.5)
+	n <- 2*i-1
+	points(x=rep(pos[1]+opt[1], nrow(zscore_colors)), y=seq(pos[1]+opt[2]-0.1, pos[1]+opt[2]+0.23, length.out=nrow(zscore_colors)), pch=22, bg=zscore_colors[,n], cex=3.5)
+	points(x=rep(pos[1]+opt[1]+s, nrow(zscore_colors)), y=seq(pos[1]+opt[2]-0.1, pos[1]+opt[2]+0.23, length.out=nrow(zscore_colors)), pch=22, bg=zscore_colors[,n+1], cex=3.5)
 
 	# Plot text
 	text(x=rep(pos[1]+opt[1], nrow(zscore_colors))+0.13, y=seq(pos[1]+opt[2]-0.1, pos[1]+opt[2]+0.23, length.out=nrow(zscore_colors)), labels=rownames(zscore_colors), pos=4)

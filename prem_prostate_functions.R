@@ -373,6 +373,99 @@ get_resistance_genes <- function(infiles, outfile)
 
 #######################################################
 #######################################################
+########## 3. Differential expression
+#######################################################
+#######################################################
+
+#############################################
+########## 3.1 Run Voom
+#############################################
+
+run_voom <- function(infiles, outfile)
+{
+	# Load libraries
+	library(limma)
+	library(edgeR)
+
+	# Load infiles
+	design_df <- tread(infiles[1])
+	rawcount_mat <- as.matrix(tread(infiles[2], fixRowNames='gene_symbol', subColNames=c('.','-')))
+
+	# Remove DMSO samples
+	design_df <- design_df[!grepl('DMSO', design_df$drug),]
+
+	# Define group label
+	design_df$group <- paste(design_df$cell_line, design_df$days, sep='--')
+
+	# Select groups to analyze
+	selected_groups <- c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS')
+
+	# Get wells corresponding to the selected groups
+	indexes <- which(sapply(design_df$group, function(x) x %in% selected_groups))
+	selected_wells <- design_df[indexes, 'well']
+
+	# Get subset of rawcount dataframe
+	rawcount_mat <- rawcount_mat[,selected_wells]
+
+	# Make design matrix
+	design <- model.matrix(~ 0+names(indexes))
+
+	# Fix column names and replace - with . (- symbols will give errors when running differential expression)
+	colnames(design) <- sapply(colnames(design), function(x) gsub('-', '.', strsplit(x, ')')[[1]][2], fixed=TRUE))
+
+	# Create edgeR object
+	dge <- DGEList(counts=rawcount_mat)
+
+	# Calculate sample normalization factors
+	dge <- calcNormFactors(dge)
+
+	# Normalize with Voom
+	v <- voom(dge, design, plot=FALSE)
+
+	# Fit linear model
+	fit <- lmFit(v, design)
+
+	# Save results
+	save(v, fit, file=outfile)
+}
+
+#############################################
+########## 3.2 Run differential expression
+#############################################
+
+run_differential_expression <- function(infile, outfile)
+{
+	# Load libraries
+	library(edgeR)
+
+	# Load infile
+	load(infile)
+
+	# Replace - with . in outfile (- wll give errore when running differential expression)
+	outfile <- gsub('-', '.', outfile, fixed=TRUE)
+
+	# Get comparison
+	comparison <- strsplit(basename(substr(outfile, 1, nchar(outfile)-4)), 'v')[[1]]
+
+	# Prepare contrast string
+	contrast_string <- paste(comparison, sep='-')
+
+	# Make contrast
+	contrast <- makeContrasts(contrasts=contrast_string, levels=fit$design)
+
+	# Calculate differential expression
+	fit2 <- contrasts.fit(fit, contrast)
+	fit2 <- eBayes(fit2)
+
+	# Get results
+	de_df <- topTable(fit2, n=nrow(fit2$t))
+
+	# Get subset
+	de_df <- de_df[,c('logFC','AveExpr','P.Value','adj.P.Val')]
+}
+
+#######################################################
+#######################################################
 ########## S. 
 #######################################################
 #######################################################
