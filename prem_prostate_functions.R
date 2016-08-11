@@ -43,6 +43,9 @@ make_design_table <- function(infile, outfile)
 							days = platemap_df[,'DAYS'],
 							drug = sapply(as.character(platemap_df[,'TREATMENT']), function(x) strsplit(x, '_')[[1]][1]))
 
+	# Add group
+	design_df$group <- paste(design_df$cell_line, design_df$days, sep='--')
+
 	# Write to outfile
 	twrite(design_df, outfile)
 }
@@ -397,8 +400,11 @@ run_voom <- function(infiles, outfile)
 	# Define group label
 	design_df$group <- paste(design_df$cell_line, design_df$days, sep='--')
 
+	# Replace - with _
+	design_df$group <- gsub('-', '_', design_df$group)
+
 	# Select groups to analyze
-	selected_groups <- c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS')
+	selected_groups <- c('LNCaP__10_DAYS', 'LNCaP_RESIDUAL__10_DAYS', 'LNCaP_RESIDUAL__27_DAYS', 'LNCaP_R_CLONES__27_DAYS')
 
 	# Get wells corresponding to the selected groups
 	indexes <- which(sapply(design_df$group, function(x) x %in% selected_groups))
@@ -436,32 +442,148 @@ run_voom <- function(infiles, outfile)
 run_differential_expression <- function(infile, outfile)
 {
 	# Load libraries
-	library(edgeR)
+	library(limma)
 
 	# Load infile
 	load(infile)
 
-	# Replace - with . in outfile (- wll give errore when running differential expression)
-	outfile <- gsub('-', '.', outfile, fixed=TRUE)
-
-	# Get comparison
-	comparison <- strsplit(basename(substr(outfile, 1, nchar(outfile)-4)), 'v')[[1]]
+	# Get comparison and replace - with _
+	comparison <- gsub('-', '_', strsplit(basename(substr(outfile, 1, nchar(outfile)-4)), 'v')[[1]])
 
 	# Prepare contrast string
-	contrast_string <- paste(comparison, sep='-')
+	contrast_string <- paste(comparison, collapse='-')
 
 	# Make contrast
 	contrast <- makeContrasts(contrasts=contrast_string, levels=fit$design)
 
-	# Calculate differential expression
+	# Run differential expression
 	fit2 <- contrasts.fit(fit, contrast)
 	fit2 <- eBayes(fit2)
 
-	# Get results
-	de_df <- topTable(fit2, n=nrow(fit2$t))
+	# Get differential expression result table
+	de_results_table <- topTable(fit2, n=nrow(fit2$t))
+
+	# Add bonferroni correction
+	de_results_table$bonferroni.P.Val <- p.adjust(de_results_table$P.Value, method='bonferroni')
+
+	# Save to outfile
+	save(de_results_table, file=outfile)
+}
+
+#############################################
+########## 3.3 Get logFC table
+#############################################
+
+get_logfc_table <- function(infiles, outfile)
+{
+	# Load infiles
+	de_results_list <- lapply(infiles, function(x){ load(x);
+											        comparison <- basename(substr(x, 1, nchar(x)-4));
+											        de_results_table$comparison <- comparison;
+											        de_results_table <- cbind(gene_id=rownames(de_results_table), de_results_table)
+											        return(de_results_table)})
+
+	# Make table
+	de_results <- do.call('rbind', de_results_list)
+
+	# Get adjusted logFC
+	de_results$logFC_adjusted <- de_results$logFC * (de_results$adj.P.Val < 0.05)*1
+
+	# Get logFC table
+	logfc <- reshape2::dcast(gene_id ~ comparison, data=de_results, value.var='logFC_adjusted')
+
+	# Fix rownames
+	rownames(logfc) <- logfc$gene_id
+	logfc$gene_id <-  NULL
+
+	# Save results
+	save(logfc, file=outfile)
+}
+
+#######################################################
+#######################################################
+########## 4. Coexpression networks
+#######################################################
+#######################################################
+
+#############################################
+########## 4.1 Get coexpression matrices
+#############################################
+
+get_coexpression_networks <- function(infiles, outfile)
+{
+	# Get infiles
+	design_df <- tread(infiles[1])
+	load(infiles[2])
+
+	# Get condition
+	condition <- strsplit(basename(outfile), '_coexpression', fixed=TRUE)[[1]][1]
+
+	# Get wells
+	wells <- design_df[design_df$group == condition, 'well']
 
 	# Get subset
-	de_df <- de_df[,c('logFC','AveExpr','P.Value','adj.P.Val')]
+	vsd_subset <- vsd_df[,wells]
+
+	# Get gene variance
+	var <- apply(vsd_subset, 1, var)
+
+	# Remove genes with 0 variance
+	vsd_subset <- vsd_subset[names(var)[var > 0],]
+
+	# Get genes to calculate network with
+	genes <- c('FOXM1','CENPF','UBE2C','FOXA1','FOXO1','NKX3-1','AR','SPDEF')
+
+	# Calculate correlations
+	correlation_list <- lapply(genes,
+								function(x)
+									lapply(rownames(vsd_subset),
+										function(y){
+											cor_res <- cor.test(vsd_subset[x,], vsd_subset[y,], method='pearson');
+											results <- c(x, y, cor_res$estimate[[1]], cor_res$p.value[[1]])
+											return( results ) }))
+
+	# Convert to dataframe
+	correlation_network <- as.data.frame(do.call('rbind', do.call('rbind', correlation_list)))
+
+	# Add column names
+	colnames(correlation_network) <- c('gene1', 'gene2', 'SCC', 'pvalue')
+
+	# Convert factors to numeric
+	correlation_network$SCC <- as.numeric(as.character(correlation_network$SCC))
+
+	# Add FDR
+	correlation_network$FDR <- p.adjust(correlation_network$pvalue, method='BH')
+
+	# Save result
+	save(correlation_network, file=outfile)
+}
+
+#############################################
+########## 4.2 Compare networks
+#############################################
+
+compare_coexpression_networks <- function(infiles, outfile)
+{
+	# Get infile names
+	names(infiles) <- sapply(infiles, function(x)  strsplit(basename(x), '_coexpression', fixed=TRUE)[[1]][1])
+
+	# Make table
+	correlation_networks <- lapply(names(infiles), function(x) { load(infiles[x]);
+																colnames(correlation_network) <- gsub('SCC', x, colnames(correlation_network));
+																return(correlation_network[,1:3])})
+
+	# Merge
+	network_comparison <- merge(correlation_networks[[1]], correlation_networks[[2]], by=c('gene1','gene2'))
+
+	# Calculate SCC difference
+	network_comparison$diff <- as.numeric(network_comparison[,3]) - as.numeric(network_comparison[,4])
+
+	# Filter
+	network_comparison <- subset(network_comparison, abs(diff) > 0.5)
+
+	# Save network
+	twrite(network_comparison, file=outfile)
 }
 
 #######################################################

@@ -233,11 +233,61 @@ def deJobs():
 		outfile = 'f3-differential_expression.dir/de_runs/%(comparison)s.rda' % locals()
 		yield [infile, outfile]
 
+@follows(mkdir('f3-differential_expression.dir/de_runs'))
+
 @files(deJobs)
 
 def runDifferentialExpression(infile, outfile):
 
-	run('run_differential_expression', infile, outfile, printfiles=True)
+	run('run_differential_expression', infile, outfile)
+
+#############################################
+########## 3.3 Get logFC table
+#############################################
+
+@files(runDifferentialExpression,
+	   'f3-differential_expression.dir/prem_prostate-logfc_table.rda')
+
+def getLogfcTable(infiles, outfile):
+
+	run('get_logfc_table', infiles, outfile)
+
+#######################################################
+#######################################################
+########## 4. Coexpression networks
+#######################################################
+#######################################################
+
+#############################################
+########## 4.1 Get coexpression matrices
+#############################################
+
+
+def coexpressionJobs():
+	# Get infile
+	infiles = ['f1-data.dir/design_table.txt', 'f1-data.dir/prem_prostate-vst.rda']
+	for condition in ['LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS']:
+		outfile = 'f4-coexpression.dir/%(condition)s_coexpression.rda' % locals()
+		yield [infiles, outfile]
+
+@follows(mkdir('f4-coexpression.dir'))
+
+@files(coexpressionJobs)
+
+def getCoexpressionNetworks(infiles, outfile):
+
+	run('get_coexpression_networks', infiles, outfile)
+
+#############################################
+########## 4.2 Compare networks
+#############################################
+
+@merge(getCoexpressionNetworks,
+	   'f4-coexpression.dir/prem_prostate-network_comparison.txt')
+
+def compareCoexpressionNetworks(infiles, outfile):
+
+	run('compare_coexpression_networks', infiles, outfile)
 
 ##############################
 ##### .
