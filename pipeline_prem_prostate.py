@@ -176,32 +176,6 @@ def getSignificantGeneTable(infile, outfile):
 
 	run('get_significant_gene_table', infile, outfile)
 
-#############################################
-########## 6. Get pathway enrichment
-#############################################
-
-@transform(getSignificantGenes,
-		   suffix('s.rda'),
-		   add_inputs(getNesTable, msigdbGenesets),
-		   '_enrichment.rda')
-
-def getPathwayEnrichment(infiles, outfile):
-
-	run('get_pathway_enrichment', infiles, outfile, printfiles=True)
-
-#############################################
-########## 7. Get resistance genes
-#############################################
-
-@transform(getSignificantGenes,
-		   suffix('significant_genes.rda'),
-		   add_inputs(getNesTable),
-		   'resistance_genes.rda')
-
-def getResistanceGenes(infiles, outfile):
-
-	run('get_resistance_genes', infiles, outfile, printfiles=True)
-
 #######################################################
 #######################################################
 ########## 3. Differential expression
@@ -262,12 +236,11 @@ def getLogfcTable(infiles, outfile):
 ########## 4.1 Get coexpression matrices
 #############################################
 
-
 def coexpressionJobs():
 	# Get infile
 	infiles = ['f1-data.dir/design_table.txt', 'f1-data.dir/prem_prostate-vst.rda']
-	for condition in ['LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS']:
-		outfile = 'f4-coexpression.dir/%(condition)s_coexpression.rda' % locals()
+	for cell_line in ['LNCaP', 'LNCaP_RESIDUAL', 'LNCaP_R-CLONES']:
+		outfile = 'f4-coexpression.dir/%(cell_line)s_coexpression.rda' % locals()
 		yield [infiles, outfile]
 
 @follows(mkdir('f4-coexpression.dir'))
@@ -289,9 +262,38 @@ def compareCoexpressionNetworks(infiles, outfile):
 
 	run('compare_coexpression_networks', infiles, outfile)
 
-##############################
-##### .
-##############################
+#######################################################
+#######################################################
+########## 5. Pathway Enrichment Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 5.1 Get Pathway enrichment
+#############################################
+
+@follows(mkdir('f5-pathway_enrichment.dir'))
+
+@transform((getNesTable, getLogfcTable),
+		   regex(r'.*/(.*).rda'),
+		   r'f5-pathway_enrichment.dir/\1_enrichment.rda')
+
+def getPathwayEnrichment(infile, outfile):
+
+	run('get_pathway_enrichment', infile, outfile, printfiles=True)
+
+#############################################
+########## 5.2 Get Network enrichment
+#############################################
+
+@merge(getCoexpressionNetworks,
+	   'f5-pathway_enrichment.dir/prem_prostate-AR_network_enrichment.rda')
+
+def getNetworkEnrichment(infiles, outfile):
+
+	run('get_network_enrichment', infiles, outfile, mem='16G')
+
+
 
 #######################################################
 #######################################################

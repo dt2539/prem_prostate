@@ -50,20 +50,41 @@ get_table_xy <- function(n, ncol)
 ########## 2.1 (2.4) Get enrichment
 #############################################
 
-get_pathway_enrichment <- function(geneset, pathway_genes, background)
+# get_pathway_enrichment <- function(geneset, pathway_genes, background)
+# {
+#     # Get binary table
+#     binary_table <- data.frame(in_geneset = sapply(background, function(x) x %in% geneset),
+#                                in_pathway = sapply(background, function(x) x %in% pathway_genes))
+
+#     # Get contingency table
+#     contingency_table <- table(binary_table)
+
+#     # Run Fisher's test
+#     fisher_test_results <- tryCatch(fisher.test(contingency_table), error=function(x) NA)
+
+#     # Return result
+#     return(fisher_test_results)
+# }
+
+#############################################
+########## 2.2 (2.4) Get up/down sets
+#############################################
+
+get_signed_genesets <- function(gene_score_table)
 {
-    # Get binary table
-    binary_table <- data.frame(in_geneset = sapply(background, function(x) x %in% geneset),
-                               in_pathway = sapply(background, function(x) x %in% pathway_genes))
+    # Get up genes
+    up_genes <- sapply(colnames(gene_score_table), function(x) rownames(gene_score_table)[gene_score_table[,x] > 0])
+    names(up_genes) <- paste0(names(up_genes), '__up')
 
-    # Get contingency table
-    contingency_table <- table(binary_table)
+    # Get down genes
+    down_genes <- sapply(colnames(gene_score_table), function(x) rownames(gene_score_table)[gene_score_table[,x] < 0])
+    names(down_genes) <- paste0(names(down_genes), '__down')
 
-    # Run Fisher's test
-    fisher_test_results <- tryCatch(fisher.test(contingency_table), error=function(x) NA)
+    # Join lists
+    signed_genesets <- c(up_genes, down_genes)
 
     # Return result
-    return(fisher_test_results)
+    return(signed_genesets)
 }
 
 

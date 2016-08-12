@@ -274,106 +274,6 @@ get_significant_gene_table <- function(infile, outfile)
 	twrite(significant_gene_table, outfile)
 }
 
-#############################################
-########## 5. Get pathway enrichment
-#############################################
-
-get_pathway_enrichment <- function(infiles, outfile)
-{
-	# Load libraries
-	library(citrus)
-
-	# Load infiles
-	load(infiles[1])
-	load(infiles[2])
-	load(infiles[3])
-
-	# Get background
-	background <- s2e(rownames(nes))
-
-	# Intersect with background
-	msigdb_genesets_filtered <- sapply(msigdb_genesets, function(x) intersect(x, background))
-
-	# Filter by size
-	geneset_size <- sapply(msigdb_genesets_filtered, length)
-	msigdb_genesets_filtered <- msigdb_genesets_filtered[names(geneset_size)[geneset_size > 30]]
-
-	# Convert gene IDs
-	significant_genes <- sapply(significant_genes, function(x) s2e(x))
-
-	# Define fisher test result list
-	fisher_results <- list()
-
-	get_pathway_enrichment <- function(geneset, pathway_genes, background)
-	{
-	    # Get binary table
-	    binary_table <- data.frame(in_geneset = sapply(background, function(x) x %in% geneset),
-	                               in_pathway = sapply(background, function(x) x %in% pathway_genes))
-
-	    # Get contingency table
-	    contingency_table <- table(binary_table)
-
-	    # Run Fisher's test
-	    fisher_test_results <- tryCatch(fisher.test(contingency_table), error=function(x) NA)
-
-	    # Return result
-	    return(fisher_test_results)
-	}
-
-
-
-	# Loop through genesets
-	for (geneset_name in names(msigdb_genesets_filtered))
-	{
-		for (comparison_name in names(significant_genes))
-		{
-			# Get label
-			label <- paste(geneset_name, comparison_name, sep='___')
-
-			# Run fisher test
-			fisher_results[[label]] <- get_pathway_enrichment(geneset = significant_genes[[comparison_name]],
-													 		  pathway_genes = msigdb_genesets_filtered[[geneset_name]],
-															  background = background)
-		}
-	}
-
-	# Get pvalues
-	pvalues <- data.frame(p=sapply(fisher_results, function(x) tryCatch(x$p.value, error=function(x) 1)))
-	pvalues$hallmark <- sapply(rownames(pvalues), function(x) strsplit(x, '___')[[1]][1])
-	pvalues$comparison <- sapply(rownames(pvalues), function(x) strsplit(x, '___')[[1]][2])
-	pvalues$FDR <- p.adjust(pvalues$p, method='BH')
-	pvalues$z <- p2z(pvalues$p)
-
-	# Cast table
-	zscore_table <- reshape2::dcast(comparison ~ hallmark, data=pvalues, value.var='z', fill=1)
-	rownames(zscore_table) <- zscore_table$comparison
-	zscore_table$comparison <- NULL
-
-	# Save results
-	save(zscore_table, fisher_results, file=outfile)
-}
-
-#############################################
-########## 6. Get resistance genes
-#############################################
-
-get_resistance_genes <- function(infiles, outfile)
-{
-	# Load infile
-	load(infiles[1])
-	load(infiles[2])
-
-	# Get resistance genes
-	resistance_genes <- setdiff(significant_genes[['LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS__down']],
-								significant_genes[['LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS__down']])
-
-	# Get NES
-	resistance_gene_nes <- sort(nes[resistance_genes, 'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS'])
-
-
-
-}
-
 #######################################################
 #######################################################
 ########## 3. Differential expression
@@ -487,10 +387,10 @@ get_logfc_table <- function(infiles, outfile)
 	de_results <- do.call('rbind', de_results_list)
 
 	# Get adjusted logFC
-	de_results$logFC_adjusted <- de_results$logFC * (de_results$adj.P.Val < 0.05)*1
+	# de_results$logFC_adjusted <- de_results$logFC * (de_results$adj.P.Val < 0.05)*1
 
 	# Get logFC table
-	logfc <- reshape2::dcast(gene_id ~ comparison, data=de_results, value.var='logFC_adjusted')
+	logfc <- reshape2::dcast(gene_id ~ comparison, data=de_results, value.var='logFC')
 
 	# Fix rownames
 	rownames(logfc) <- logfc$gene_id
@@ -517,10 +417,13 @@ get_coexpression_networks <- function(infiles, outfile)
 	load(infiles[2])
 
 	# Get condition
-	condition <- strsplit(basename(outfile), '_coexpression', fixed=TRUE)[[1]][1]
+	cell_line <- strsplit(basename(outfile), '_coexpression', fixed=TRUE)[[1]][1]
+
+	# Remove cells with timepoints less than 27 days
+	design_df <- design_df[design_df$cell_line != 'DU145' & design_df$group != 'LNCaP_RESIDUAL--10_DAYS',]
 
 	# Get wells
-	wells <- design_df[design_df$group == condition, 'well']
+	wells <- design_df[design_df$cell_line == cell_line, 'well']
 
 	# Get subset
 	vsd_subset <- vsd_df[,wells]
@@ -532,14 +435,14 @@ get_coexpression_networks <- function(infiles, outfile)
 	vsd_subset <- vsd_subset[names(var)[var > 0],]
 
 	# Get genes to calculate network with
-	genes <- c('FOXM1','CENPF','UBE2C','FOXA1','FOXO1','NKX3-1','AR','SPDEF')
+	genes <- c('AR')
 
 	# Calculate correlations
 	correlation_list <- lapply(genes,
 								function(x)
 									lapply(rownames(vsd_subset),
 										function(y){
-											cor_res <- cor.test(vsd_subset[x,], vsd_subset[y,], method='pearson');
+											cor_res <- cor.test(vsd_subset[x,], vsd_subset[y,], method='spearman');
 											results <- c(x, y, cor_res$estimate[[1]], cor_res$p.value[[1]])
 											return( results ) }))
 
@@ -551,6 +454,7 @@ get_coexpression_networks <- function(infiles, outfile)
 
 	# Convert factors to numeric
 	correlation_network$SCC <- as.numeric(as.character(correlation_network$SCC))
+	correlation_network$pvalue <- as.numeric(as.character(correlation_network$pvalue))
 
 	# Add FDR
 	correlation_network$FDR <- p.adjust(correlation_network$pvalue, method='BH')
@@ -580,11 +484,107 @@ compare_coexpression_networks <- function(infiles, outfile)
 	network_comparison$diff <- as.numeric(network_comparison[,3]) - as.numeric(network_comparison[,4])
 
 	# Filter
-	network_comparison <- subset(network_comparison, abs(diff) > 0.5)
+	network_comparison <- subset(network_comparison, gene1 == 'AR' & abs(diff) > 0.8)
 
 	# Save network
 	twrite(network_comparison, file=outfile)
 }
+
+#######################################################
+#######################################################
+########## 5. Pathway Enrichment Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 5.1 Get Pathway enrichment
+#############################################
+
+get_pathway_enrichment <- function(infile, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load infile
+	load(infile)
+
+	# Get table type
+	table_type <- strsplit(basename(infile), '[_-]+')[[1]][3]
+
+	# Get appropriate table for logFC or msVIPER
+	if (table_type == 'msviper')
+	{
+		# Replace non-significant NES with 0
+		nes[abs(nes) < citrus::p2z(0.05)] <- 0
+
+		# Define score table
+		gene_score_table <- nes
+
+	}	else if (table_type == 'logfc')
+	{
+		# Replace abs(logFC < 1.5) with 0
+		logfc[abs(logfc) < 2] <- 0
+
+		# Define score table
+		gene_score_table <- logfc
+	}
+
+	# Convert rownames
+	rownames(gene_score_table) <- background <- s2e(rownames(gene_score_table))
+
+	# Get up/down groups
+	signed_genesets <- get_signed_genesets(gene_score_table)
+
+	# Get enrichment
+	pathway_enrichment <- sapply(signed_genesets, function(x) compute_pathway_enrichment(x, background))
+
+	# Save result
+	save(pathway_enrichment, file=outfile)
+}
+
+#############################################
+########## 5.2 Get Network enrichment
+#############################################
+
+get_network_enrichment <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Get infile labels
+	names(infiles) <- gsub('_coexpression.rda', '', basename(infiles))
+
+	# Get coexpression networks
+	networks <- sapply(names(infiles), function(x) {load(infiles[x]); correlation_network$gene2 <- s2e(as.character(correlation_network$gene2)); return(correlation_network)}, simplify=FALSE)
+
+	# Get positive correlated
+	positive_correlated <- sapply(networks, function(x) as.character(x[x$SCC > 0 & x$pvalue < 0.01 & x$SCC != 1, 'gene2']))
+	names(positive_correlated) <- paste0(names(positive_correlated), '_pos')
+
+	# Get negative correlated
+	negative_correlated <- sapply(networks, function(x) as.character(x[x$SCC < 0 & x$pvalue < 0.01 & x$SCC != 1, 'gene2']))
+	names(negative_correlated) <- paste0(names(negative_correlated), '_neg')
+
+	# Join
+	correlated_genes <- c(positive_correlated, negative_correlated)
+	sapply(correlated_genes, length)
+
+	# Get background
+	background <- union(union(networks[[1]][,'gene2'], networks[[2]][,'gene2']), networks[[3]][,'gene2'])
+
+	# Get enrichment
+	correlated_enrichment <- sapply(correlated_genes, function(x) compute_pathway_gsea(x, background))
+
+	# Get subset of significant
+	good_pathways <- apply(correlated_enrichment, 1, function(x) sum(x > p2z(0.05)))
+
+	# Get enrichment matrix with significant pathways
+	correlated_enrichment_pathways <- correlated_enrichment[names(good_pathways)[good_pathways > 0],]
+
+	# Save
+	save(correlated_enrichment_pathways, file=outfile)
+}
+
 
 #######################################################
 #######################################################
