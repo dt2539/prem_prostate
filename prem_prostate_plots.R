@@ -163,8 +163,8 @@ s <- 0.1
 arrow_opts <- list('1'=c(0, 0), '2'=c(0.6, 0.45), '3'=c(0.6, -0.45))
 names(arrow_opts) <- groups
 
-for (l in names(arrow_opts))
-{
+for (l in names(arrow_opts)
+	){
 	# Get option
 	opt <- arrow_opts[[l]]
 

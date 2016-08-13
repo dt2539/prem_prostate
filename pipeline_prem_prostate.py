@@ -35,6 +35,8 @@ def run(function, infiles, outfile, makedir=False, qsub=True, mem='8000M', nodes
 #############################################
 ##### 1. Default variables #####
 msigdbGenesets = '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f1-genelists.dir/msigdb-genesets.rda'
+cindyPredictions = '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f2-interaction_lists.dir/prad_cindy-list.rda'
+preppiPredictions = '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f2-interaction_lists.dir/preppi-list.rda'
 
 ##### 2. Other variables #####
 # Set comparisons
@@ -162,7 +164,7 @@ def getNesTable(infiles, outfile):
 
 def getSignificantGenes(infile, outfile):
 
-	run('get_significant_genes', infile, outfile, qsub=False)
+	run('get_significant_genes', infile, outfile)
 
 #############################################
 ########## 5. Get significant gene table
@@ -280,7 +282,7 @@ def compareCoexpressionNetworks(infiles, outfile):
 
 def getPathwayEnrichment(infile, outfile):
 
-	run('get_pathway_enrichment', infile, outfile, printfiles=True)
+	run('get_pathway_enrichment', infile, outfile, mem='16G')
 
 #############################################
 ########## 5.2 Get Network enrichment
@@ -293,6 +295,48 @@ def getNetworkEnrichment(infiles, outfile):
 
 	run('get_network_enrichment', infiles, outfile, mem='16G')
 
+#############################################
+########## 5.3 Make tables
+#############################################
+
+@transform('f5-pathway_enrichment.dir/prem_prostate-logfc_table_enrichment.rda',#(getPathwayEnrichment, getNetworkEnrichment),
+		   suffix('.rda'),
+		   '.txt')
+
+def getEnrichmentTables(infile, outfile):
+
+	run('get_enrichment_tables', infile, outfile)
+
+#######################################################
+#######################################################
+########## 6. Modulator Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 6.1 Calculate Null Model
+#############################################
+
+@transform((preppiPredictions, cindyPredictions),
+		   regex(r'.*/(.*)-list.rda'),
+		   add_inputs(getNesTable),
+		   r'f6-modulator_analysis.dir/prem_prostate-resistance_genes_\1_null-10000.rda')
+
+def getResistanceModulatorNull(infiles, outfile):
+
+	run('get_resistance_modulator_null', infiles, outfile)
+
+#############################################
+########## 6.2 Get Top Modulators
+#############################################
+
+@transform(getResistanceModulatorNull,
+		   suffix('.rda'),
+		   '_predictions.txt')
+
+def getTopModulators(infile, outfile):
+
+	run('get_top_modulators', infile, outfile)
 
 
 #######################################################

@@ -463,33 +463,6 @@ get_coexpression_networks <- function(infiles, outfile)
 	save(correlation_network, file=outfile)
 }
 
-#############################################
-########## 4.2 Compare networks
-#############################################
-
-compare_coexpression_networks <- function(infiles, outfile)
-{
-	# Get infile names
-	names(infiles) <- sapply(infiles, function(x)  strsplit(basename(x), '_coexpression', fixed=TRUE)[[1]][1])
-
-	# Make table
-	correlation_networks <- lapply(names(infiles), function(x) { load(infiles[x]);
-																colnames(correlation_network) <- gsub('SCC', x, colnames(correlation_network));
-																return(correlation_network[,1:3])})
-
-	# Merge
-	network_comparison <- merge(correlation_networks[[1]], correlation_networks[[2]], by=c('gene1','gene2'))
-
-	# Calculate SCC difference
-	network_comparison$diff <- as.numeric(network_comparison[,3]) - as.numeric(network_comparison[,4])
-
-	# Filter
-	network_comparison <- subset(network_comparison, gene1 == 'AR' & abs(diff) > 0.8)
-
-	# Save network
-	twrite(network_comparison, file=outfile)
-}
-
 #######################################################
 #######################################################
 ########## 5. Pathway Enrichment Analysis
@@ -512,34 +485,18 @@ get_pathway_enrichment <- function(infile, outfile)
 	table_type <- strsplit(basename(infile), '[_-]+')[[1]][3]
 
 	# Get appropriate table for logFC or msVIPER
-	if (table_type == 'msviper')
-	{
-		# Replace non-significant NES with 0
-		nes[abs(nes) < citrus::p2z(0.05)] <- 0
-
-		# Define score table
-		gene_score_table <- nes
-
-	}	else if (table_type == 'logfc')
-	{
-		# Replace abs(logFC < 1.5) with 0
-		logfc[abs(logfc) < 2] <- 0
-
-		# Define score table
-		gene_score_table <- logfc
-	}
+	switch(table_type,
+		   'msviper' = {gene_score_table <- nes},
+		   'logfc' = {gene_score_table <- logfc})
 
 	# Convert rownames
-	rownames(gene_score_table) <- background <- s2e(rownames(gene_score_table))
-
-	# Get up/down groups
-	signed_genesets <- get_signed_genesets(gene_score_table)
+	rownames(gene_score_table) <- s2e(rownames(gene_score_table))
 
 	# Get enrichment
-	pathway_enrichment <- sapply(signed_genesets, function(x) compute_pathway_enrichment(x, background))
+	gsea_nes_table <- apply(gene_score_table, 2, compute_pathway_gsea)
 
 	# Save result
-	save(pathway_enrichment, file=outfile)
+	save(gsea_nes_table, file=outfile)
 }
 
 #############################################
@@ -555,36 +512,133 @@ get_network_enrichment <- function(infiles, outfile)
 	names(infiles) <- gsub('_coexpression.rda', '', basename(infiles))
 
 	# Get coexpression networks
-	networks <- sapply(names(infiles), function(x) {load(infiles[x]); correlation_network$gene2 <- s2e(as.character(correlation_network$gene2)); return(correlation_network)}, simplify=FALSE)
+	network_list <- lapply(names(infiles), function(x) {load(infiles[x]);
+													    correlation_network$gene2 <- s2e(as.character(correlation_network$gene2));
+													    correlation_network$cell_line <- x;
+													    return(correlation_network[,c('gene2','SCC','cell_line')])})
 
-	# Get positive correlated
-	positive_correlated <- sapply(networks, function(x) as.character(x[x$SCC > 0 & x$pvalue < 0.01 & x$SCC != 1, 'gene2']))
-	names(positive_correlated) <- paste0(names(positive_correlated), '_pos')
+	# Concatenate them
+	networks <- do.call('rbind', network_list)
 
-	# Get negative correlated
-	negative_correlated <- sapply(networks, function(x) as.character(x[x$SCC < 0 & x$pvalue < 0.01 & x$SCC != 1, 'gene2']))
-	names(negative_correlated) <- paste0(names(negative_correlated), '_neg')
+	# Cast the table
+	correlation_table <- dcast(gene2 ~ cell_line, data=networks, value.var='SCC', fill=0)
 
-	# Join
-	correlated_genes <- c(positive_correlated, negative_correlated)
-	sapply(correlated_genes, length)
-
-	# Get background
-	background <- union(union(networks[[1]][,'gene2'], networks[[2]][,'gene2']), networks[[3]][,'gene2'])
+	# Fix rownames
+	rownames(correlation_table) <- correlation_table$gene2
+	correlation_table$gene2 <- NULL
+	correlation_table <- as.matrix(correlation_table)
 
 	# Get enrichment
-	correlated_enrichment <- sapply(correlated_genes, function(x) compute_pathway_gsea(x, background))
-
-	# Get subset of significant
-	good_pathways <- apply(correlated_enrichment, 1, function(x) sum(x > p2z(0.05)))
-
-	# Get enrichment matrix with significant pathways
-	correlated_enrichment_pathways <- correlated_enrichment[names(good_pathways)[good_pathways > 0],]
+	gsea_nes_table <- apply(correlation_table, 2, compute_pathway_gsea)
 
 	# Save
-	save(correlated_enrichment_pathways, file=outfile)
+	save(gsea_nes_table, file=outfile)
 }
 
+#############################################
+########## 5.3 Make tables
+#############################################
+
+get_enrichment_tables <- function(infile, outfile)
+{
+	# Load infile
+	load(infile)
+
+	# Write to table
+	twrite(gsea_nes_table, file=outfile, rownames='pathway')
+}
+
+#######################################################
+#######################################################
+########## 6. Modulator Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 6.1 Get CINDy predictions
+#############################################
+
+#############################################
+########## 6.2 Calculate Null Model
+#############################################
+
+get_resistance_modulator_null <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load infiles
+	load(infiles[1])
+	load(infiles[2])
+
+	# Get prediction list
+	prediction <- ifelse(grepl('cindy', infiles[1]), 'cindy', 'preppi')
+	switch(prediction,
+		   'cindy' = {prediction_list <- prad_cindy_predictions},
+		   'preppi' = {prediction_list <- preppi_list})
+
+	# Get NES scores
+	nes_scores <- nes[,'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS']
+
+	# Convert names to Entrez IDs
+	names(nes_scores) <- s2e(names(nes_scores))
+
+	# Get resistance genes
+	resistance_genes <- names(nes_scores)[nes_scores > p2z(0.01)]
+
+	# Get null pool
+	null_pool <- names(nes_scores)[abs(nes_scores) < p2z(0.5)]
+
+	# Get real counts
+	real_counts <- sapply(prediction_list, function(x) length(intersect(x, resistance_genes)))
+
+	# Get N
+	n <- as.numeric(strsplit(strsplit(outfile, '-')[[1]][4], '.', fixed=TRUE)[[1]][1])
+
+	# Get null counts
+	null_counts <- sapply(paste0('random_', 1:n),
+						  function(x) sapply(prediction_list,
+						  					 function(y) length(intersect(y, sample(null_pool, length(resistance_genes))))))
+
+	# Make final table
+	null_table <- cbind(real=real_counts, null_counts)
+
+	# Save table
+	save(null_table, file=outfile)
+}
+
+#############################################
+########## 6.3 Get Top Modulators
+#############################################
+
+get_top_modulators <- function(infile, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load data
+	load(infile)
+
+	# Calculate p-values for each modulator
+	pvalues <- apply(null_table, 1, function(x) (1+sum(x[-1] >= x[1])) / (length(x) + 1))
+
+	# Get median number of associated MRs in null
+	medians <- apply(null_table[,-1], 1, median)
+
+	# Get result table
+	modulator_table <- data.frame(entrez_id = rownames(null_table),
+								  gene_symbol = e2s(rownames(null_table)),
+								  associated_resistance_genes = null_table[,1],
+								  median_associated_random = medians,
+								  pvalue = pvalues,
+								  FDR = p.adjust(pvalues, method='BH'))
+
+	# Sort
+	modulator_table <- modulator_table[order(modulator_table$pvalue, -modulator_table$associated_resistance_genes),]
+
+	# Save table
+	twrite(modulator_table, outfile, sort='pvalue')
+}
 
 #######################################################
 #######################################################
