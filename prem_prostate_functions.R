@@ -274,6 +274,28 @@ get_significant_gene_table <- function(infile, outfile)
 	twrite(significant_gene_table, outfile)
 }
 
+#############################################
+########## 6. Synergy analysis
+#############################################
+
+run_msviper_synergy <- function(infile, outfile)
+{
+	# Load libraries
+	library(viper)
+
+	# Load infile
+	load(infile)
+
+	# Run msVIPER Combinatorial
+	comb <- msviperCombinatorial(msviper_results, 0.01)
+
+	# Run msVIPER Synergy
+	msviper_synergy_results <- msviperSynergy(comb, per=10000)
+
+	# Save results
+	save(msviper_synergy_results, file=outfile)
+}
+
 #######################################################
 #######################################################
 ########## 3. Differential expression
@@ -435,7 +457,7 @@ get_coexpression_networks <- function(infiles, outfile)
 	vsd_subset <- vsd_subset[names(var)[var > 0],]
 
 	# Get genes to calculate network with
-	genes <- c('AR')
+	genes <- c('AR', 'FOXA1')
 
 	# Calculate correlations
 	correlation_list <- lapply(genes,
@@ -462,6 +484,37 @@ get_coexpression_networks <- function(infiles, outfile)
 	# Save result
 	save(correlation_network, file=outfile)
 }
+
+#############################################
+########## 4.2 Compare networks
+#############################################
+
+compare_coexpression_networks <- function(infiles, outfile)
+{
+	# Get infile labels
+	names(infiles) <- gsub('_coexpression.rda', '', basename(infiles))
+
+	# Get coexpression networks
+	network_list <- lapply(names(infiles), function(x) {load(infiles[x]);
+													    correlation_network$gene2 <- as.character(correlation_network$gene2);
+													    correlation_network$cell_line <- x;
+													    return(correlation_network[,c('gene2','SCC','cell_line')])})
+
+	# Concatenate them
+	networks <- do.call('rbind', network_list)
+
+	# Cast the table
+	correlation_table <- dcast(gene2 ~ cell_line, data=networks, value.var='SCC', fill=0)
+
+	# Fix rownames
+	rownames(correlation_table) <- correlation_table$gene2
+	correlation_table$gene2 <- NULL
+	
+	# Save result
+	twrite(correlation_table, outfile, rownames='gene_symbol')
+}
+
+
 
 #######################################################
 #######################################################
@@ -638,6 +691,100 @@ get_top_modulators <- function(infile, outfile)
 
 	# Save table
 	twrite(modulator_table, outfile, sort='pvalue')
+}
+
+#######################################################
+#######################################################
+########## 7. DeMAND Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 7.1 Get Interactome Table
+#############################################
+
+get_regulon_table <- function(infile, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load infiles
+	load(infile)
+
+	# Make regulator list
+	regulon_list <- lapply(names(regulon), function(x) {target_genes <- names(regulon[[x]]$tfmode);
+				    									target_gene_table <- data.frame(regulator=x, target=target_genes);
+														return(target_gene_table)})
+
+	# Convert to table
+	regulon_table <- do.call('rbind', regulon_list)
+
+	# Write to outfile
+	twrite(regulon_table, outfile)
+}
+
+#############################################
+########## 7.2 Run DeMAND
+#############################################
+
+run_demand <- function(infiles, outfile)
+{
+	# Load libraries
+	library(DeMAND)
+	library(citrus)
+
+	# Load infiles
+	design_df <- tread(infiles[1])
+	load(infiles[2])
+	network_table <- tread(infiles[3])
+
+	# Convert network table to character
+	network_table <- apply(network_table, 2, as.character)
+
+	# Set comparison pair
+	pair <- strsplit(basename(outfile), 'v|__')[[1]][1:2]
+
+	# Get wells for each condition
+	conditions <- sapply(pair, function(x) which(colnames(vsd_df) %in% design_df[design_df$group==x, 'well']))
+
+	# Get genes
+	good_genes <- sapply(conditions, function(x) {diverse_count <- apply(vsd_df[,x], 1, function(x) length(unique(x)));
+												  return(names(diverse_count)[diverse_count > length(x)/2])})# l
+	good_genes <- intersect(good_genes[[1]], good_genes[[2]])
+
+	# Filter dataframe
+	vsd_df_subset <- vsd_df[good_genes,]
+
+	# Prepare annotation
+	annotation_table <- as.matrix(data.frame(exp_names=rownames(vsd_df_subset), network_names=s2e(rownames(vsd_df_subset))))
+
+	# Prepare DeMAND object
+	dobj <- demandClass(exp=vsd_df_subset, anno=annotation_table, network=network_table, moa=NULL)
+
+	# Run DeMAND
+	dobj <- runDeMAND(dobj, fgIndex=conditions[[pair[1]]], bgIndex=conditions[[pair[2]]])
+
+	# Save results
+	save(dobj, file=outfile)
+
+	# # # Get MoA
+	# moa <- dobj@moa
+	# rownames(moa) <- e2s(moa[,1])
+	# head(moa, 70)
+
+	# write(rownames(moa)[1:500], file='top_demand.txt')
+	# write(rownames(moa), file='background.txt')
+
+	# # Get KLD
+	# kld <- dobj@KLD
+	# kld[,1] <- e2s(kld[,1])
+	# kld[,2] <- e2s(kld[,2])
+	# head(kld, 50)
+
+	# ix <- kld[,1] == 'AR' | kld[,2] == 'AR'
+	# kld[ix,]
+
+
 }
 
 #######################################################

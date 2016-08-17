@@ -221,14 +221,298 @@ load(infile)
 
 #######################################################
 #######################################################
-########## S. 
+########## S1. Androgen Independence Analysis
 #######################################################
 #######################################################
 
 #############################################
-########## . 
+########## 1.1 AR and PSA Differential Expr.
 #############################################
 
+# Make directory
+dir.create('plots/f1-androgen_independence_analysis')
+
+### Input and Output
+infiles <- c('f1-data.dir/design_table.txt', 'f1-data.dir/prem_prostate-vst.rda')
+outfile <- 'plots/f1-androgen_independence_analysis/f1-ar_psa_de.png'
+
+### Plot
+# Load infiles
+design_df <- tread(infiles[1])
+load(infiles[2])
+
+# Filter design dataframe by removing DMSO samples
+design_df <- design_df[design_df$drug != 'DMSO',]
+design_df <- design_df[design_df$group %in% c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'),]
+
+# Get subset of KLK3 and AR expression
+vsd_subset_melt <- melt(vsd_df[c('KLK3','AR','TP53'),])
+colnames(vsd_subset_melt) <- c('gene_symbol', 'well', 'vst_expression')
+
+# Replace KLK3 with PSA
+vsd_subset_melt$gene_symbol <- gsub('KLK3', 'PSA', vsd_subset_melt$gene_symbol)
+
+# Merge with design
+merged_expression_df <- merge(vsd_subset_melt, design_df, by='well')
+
+# Reorder levels
+merged_expression_df$group <- factor(merged_expression_df$group, c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'))
+
+# Plot
+png(outfile, height=1500, width=600, pointsize=19)
+
+par(mfrow=c(3,1))
+
+for (gene in c('AR','PSA','TP53'))
+{
+	# Get subset for plotting
+	plot_df <- merged_expression_df[merged_expression_df$gene_symbol == gene,]
+
+	# Plot
+	boxplot(vst_expression ~ group, data=plot_df, main=gene, xaxt='n', ylab='Expression Level (VST)')
+
+	# Fix axis
+	axis(1, 1:4, c('Untreated', 'Residual\n(10 days)', 'Residual\n(27 days)', 'Resistant\n(27 days)'), padj=1)
+}
+
+dev.off()
+
+#############################################
+########## 1.2 Differential Expression NES
+#############################################
+
+### Input and output
+infile <- 'f5-pathway_enrichment.dir/prem_prostate-logfc_table_enrichment.rda'
+outfile <- 'plots/f1-androgen_independence_analysis/f2-de_gsea.png'
+
+### Plot
+# Load libraries
+library(pheatmap)
+
+# Load infile
+load(infile)
+
+# Remove HALLMARK from rownames of table
+rownames(gsea_nes_table) <- gsub('HALLMARK_', '', rownames(gsea_nes_table))
+
+# Select hallmarks
+selected_hallmarks <- c('G2M_CHECKPOINT','OXIDATIVE_PHOSPHORYLATION','PI3K_AKT_MTOR_SIGNALING','MYC_TARGETS_V1','ANDROGEN_RESPONSE')
+
+# Get subset
+gsea_subset <- -gsea_nes_table[selected_hallmarks, c('LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS','LNCaP_RESIDUAL--10_DAYSvLNCaP_RESIDUAL--27_DAYS','LNCaP_RESIDUAL--10_DAYSvLNCaP_R-CLONES--27_DAYS')]
+
+rownames(gsea_subset) <- gsub('_', ' ', rownames(gsea_subset))
+
+# Plot
+png(outfile, height=500, width=300)
+
+pheatmap(gsea_subset, color = colorRampPalette(c("navy", "white", "firebrick3"))(50), cluster_col=FALSE, gaps_col = c(1,2,3), cluster_row=FALSE)
+
+dev.off()
+
+#############################################
+########## 1.3 MR Plot
+#############################################
+
+### Input and output
+infile <- 'f2-msviper.dir/msviper_runs/LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS.rda'
+outfile <- 'plots/f1-androgen_independence_analysis/f3-mr.png'
+
+### Plot
+# Load libraries
+library(viper)
+
+# Load infile
+load(infile)
+
+### Plot
+png(outfile, height=500, width=700)
+plot(msviper_results, mr=c('FOXM1','TRIP13','CHEK1','AURKA','CENPI','TOP2A','UBE2C','TYMS','CENPF'))
+dev.off()
+
+
+#############################################
+########## 1.4 AR Network Enrichment
+#############################################
+
+### Input and output
+infile <- 'f5-pathway_enrichment.dir/prem_prostate-AR_network_enrichment.rda'
+outfile <- 'plots/f1-androgen_independence_analysis/f4-ar_gsea.png'
+
+### Plot
+# Load infile
+load(infile)
+
+# Remove HALLMARK from rownames of table
+rownames(gsea_nes_table) <- gsub('HALLMARK_', '', rownames(gsea_nes_table))
+
+# Select hallmarks
+selected_hallmarks <- c('ANDROGEN_RESPONSE', 'G2M_CHECKPOINT', 'E2F_TARGETS','GLYCOLYSIS','P53_PATHWAY')
+
+# Get subset
+gsea_subset <- gsea_nes_table[selected_hallmarks,]# c('LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS','LNCaP_RESIDUAL--10_DAYSvLNCaP_RESIDUAL--27_DAYS','LNCaP_RESIDUAL--10_DAYSvLNCaP_R-CLONES--27_DAYS')]
+
+rownames(gsea_subset) <- gsub('_', ' ', rownames(gsea_subset))
+
+# Plot
+png(outfile, height=500, width=500)
+
+pheatmap(gsea_subset[,c(1,3,2)], color = colorRampPalette(c("navy", "white", "firebrick3"))(50), cluster_col=FALSE, gaps_col = c(1,2,3), cluster_row=FALSE)
+
+dev.off()
+
+#############################################
+########## 1.5 MYCN GSEA
+#############################################
+
+### Input and output
+infiles <- c('f3-differential_expression.dir/prem_prostate-logfc_table.rda',
+		     '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f1-genelists.dir/msigdb-genesets.rda')
+outfile <- 'plots/f1-androgen_independence_analysis/f5-mycn_gsea.png'
+
+### Plot
+# Load libraries
+library(citrus)
+
+# Load infile
+load(infiles[1])
+load(infiles[2])
+
+# Convert rownames
+rownames(logfc) <- s2e(rownames(logfc))
+
+# Get MYC targets
+myc_targets <- c(msigdb_genesets$HALLMARK_MYC_TARGETS_V1, msigdb_genesets$HALLMARK_MYC_TARGETS_V2)
+
+# Get GSEA
+gsea_results <- gsea(as.matrix(logfc)[,4], myc_targets, method='pareto')
+
+# Plot
+png(outfile, height=600, width=1000, pointsize=19)
+
+plot_gsea(gsea_results)
+
+dev.off()
+
+#############################################
+########## 1.6 AR GSEA
+#############################################
+
+### Input and output
+infiles <- c('f3-differential_expression.dir/prem_prostate-logfc_table.rda',
+		     '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f1-genelists.dir/msigdb-genesets.rda')
+outfile <- 'plots/f1-androgen_independence_analysis/f6-ar_gsea.png'
+
+### Plot
+# Load libraries
+library(citrus)
+
+# Load infile
+load(infiles[1])
+load(infiles[2])
+
+# Convert rownames
+rownames(logfc) <- s2e(rownames(logfc))
+
+# Get MYC targets
+myc_targets <- c(msigdb_genesets$HALLMARK_ANDROGEN_RESPONSE)
+
+# Get GSEA
+gsea_results <- gsea(as.matrix(logfc)[,4], myc_targets, method='pareto')
+
+# Plot
+png(outfile, height=600, width=1000, pointsize=19)
+
+plot_gsea(gsea_results)
+
+dev.off()
+
+#############################################
+########## 1.7 FOXA1 - AR correlation
+#############################################
+
+### Input and Output
+infiles <- c('f1-data.dir/design_table.txt', 'f1-data.dir/prem_prostate-vst.rda')
+outfile <- 'plots/f1-androgen_independence_analysis/f6-ar_foxa1_cor.png'
+
+### Plot
+# Load infiles
+design_df <- tread(infiles[1])
+load(infiles[2])
+
+# Filter design dataframe by removing DMSO samples
+# design_df <- design_df[design_df$cell_line != 'DU145',]# %in% c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'),]
+# design_df <- design_df[design_df$group %in% c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'),]
+
+# Get wells
+wells <- sapply(unique(design_df$cell_line), function(x) design_df[design_df$cell_line==x, 'well'])
+
+# Get expmats
+expmats <- sapply(wells, function(x) vsd_df[,x])
+
+# Plot
+png(outfile, height=300, width=1000)
+
+par(mfrow=c(1,4))
+
+for (cond in names(expmats))
+{
+	x <- expmats[[cond]]['AR',]
+	y <- expmats[[cond]]['FOXA1',]
+
+	plot(x, y, xlab='AR', ylab=ifelse(cond==names(expmats)[1],'FOXA1',''), main=cond)
+
+	abline(lm(y~x))
+
+	print(summary(lm(y~x)))
+}
+
+
+dev.off()
+
+#############################################
+########## 1.8 Resistant vs Residual NES
+#############################################
+
+### Input and Output
+infile <- 'f5-pathway_enrichment.dir/prem_prostate-logfc_table_enrichment.rda'
+outfile <- 'plots/f1-androgen_independence_analysis/f7-de_nes.png'
+
+### Plot
+# Load libraries
+library(squash)
+
+# Load infile
+load(infile)
+
+# Remove HALLMARK from rownames of table
+rownames(gsea_nes_table) <- gsub('HALLMARK_', '', rownames(gsea_nes_table))
+
+# Select hallmarks
+selected_hallmarks <- c('MYC_TARGETS_V1','G2M_CHECKPOINT','E2F_TARGETS','P53_PATHWAY','ANDROGEN_RESPONSE')
+
+# Get NES values
+nes_values <- t(gsea_nes_table[selected_hallmarks, 'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS'])
+
+# Get labels
+hallmark_labels <- gsub('_', ' ', selected_hallmarks)
+
+# Get color map
+nes.cmap <- makecmap(seq(-6.5, 6.5, by=0.5), colFn=colorRampPalette(c('navy','white','firebrick3')), n=30)
+
+# Get colors
+nes_colors <- cmap(nes_values, nes.cmap)
+
+# Plot
+png(outfile, height=500, width=850)
+
+plot(1, type="n", axes=F, xlab="", ylab="", xlim=c(0, length(nes_colors)+1), ylim=c(0, 5))
+points(x=1:length(nes_colors), y=rep(1, length(nes_colors)), bg=nes_colors, pch=22, cex=23, xaxt='n', yaxt='n')
+text(x=1:length(nes_colors)-0.1, y=rep(2, length(nes_colors)), labels=hallmark_labels, srt=45, adj=0, cex=1.3)
+
+hkey(nes.cmap, wh=which(nes.cmap$breaks %in% seq(-6, 6, by=3)), x=1, stretch=0.9)
+
+dev.off()
 
 
 ##################################################

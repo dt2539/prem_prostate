@@ -178,6 +178,20 @@ def getSignificantGeneTable(infile, outfile):
 
 	run('get_significant_gene_table', infile, outfile)
 
+#############################################
+########## 6. Synergy analysis
+#############################################
+
+@follows(mkdir('f2-msviper.dir/msviper_synergy'))
+
+@transform('f2-msviper.dir/msviper_runs/*.rda',
+	       regex(r'.*/msviper_runs/(.*).rda'),
+	       r'f2-msviper.dir/msviper_synergy/\1__synergy.rda')
+
+def runMsviperSynergy(infile, outfile):
+
+	run('run_msviper_synergy', infile, outfile, mem='64G')
+
 #######################################################
 #######################################################
 ########## 3. Differential expression
@@ -324,7 +338,7 @@ def getEnrichmentTables(infile, outfile):
 
 def getResistanceModulatorNull(infiles, outfile):
 
-	run('get_resistance_modulator_null', infiles, outfile)
+	run('get_resistance_modulator_null', infiles, outfile, mem='16G')
 
 #############################################
 ########## 6.2 Get Top Modulators
@@ -337,6 +351,45 @@ def getResistanceModulatorNull(infiles, outfile):
 def getTopModulators(infile, outfile):
 
 	run('get_top_modulators', infile, outfile)
+
+#######################################################
+#######################################################
+########## 7. DeMAND Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 7.1 Get Interactome Table
+#############################################
+
+@follows(mkdir('f7-demand.dir'))
+
+@merge(mergeSu2cRegulons,
+	   'f7-demand.dir/su2c-merged_regulon.txt')
+
+def getRegulonTable(infile, outfile):
+
+	run('get_regulon_table', infile, outfile)
+
+#############################################
+########## 7.2 Run DeMAND
+#############################################
+
+def demandJobs():
+	# Set infiles
+	infiles = ['f1-data.dir/design_table.txt', 'f1-data.dir/prem_prostate-vst.rda', 'f7-demand.dir/su2c-merged_regulon.txt']
+	# Loop through comparisons
+	for comparison in comparisons:
+		outfile = 'f7-demand.dir/demand_runs/%(comparison)s__demand.rda' % locals()
+		yield [infiles, outfile]
+
+@follows(mkdir('f7-demand.dir/demand_runs'))
+
+@files(demandJobs)
+
+def runDemand(infiles, outfile):
+
+	run('run_demand', infiles, outfile)
 
 
 #######################################################
