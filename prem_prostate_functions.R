@@ -767,25 +767,411 @@ run_demand <- function(infiles, outfile)
 	# Save results
 	save(dobj, file=outfile)
 
-	# # # Get MoA
-	# moa <- dobj@moa
-	# rownames(moa) <- e2s(moa[,1])
-	# head(moa, 70)
+	# # Get MoA
+	moa <- dobj@moa
+	rownames(moa) <- e2s(moa[,1])
+	head(moa, 70)
 
-	# write(rownames(moa)[1:500], file='top_demand.txt')
-	# write(rownames(moa), file='background.txt')
+	write(rownames(moa)[1:500], file='top_demand.txt')
+	write(rownames(moa), file='background.txt')
 
-	# # Get KLD
-	# kld <- dobj@KLD
-	# kld[,1] <- e2s(kld[,1])
-	# kld[,2] <- e2s(kld[,2])
-	# head(kld, 50)
+	# Get KLD
+	kld <- dobj@KLD
+	kld[,1] <- e2s(kld[,1])
+	kld[,2] <- e2s(kld[,2])
+	head(kld, 50)
 
-	# ix <- kld[,1] == 'AR' | kld[,2] == 'AR'
-	# kld[ix,]
+	write(rownames(moa)[1:150], file='top_dysregulated.txt')
+	write(rownames(moa), file='background.txt')
+
+	ix <- kld[,1] == 'AR' | kld[,2] == 'AR'
+	kld[ix,]
+
+	twrite(moa[1:50,], 'moa_res.txt')
+	twrite(kld, 'kld_res.txt')
 
 
 }
+
+#############################################
+########## 7.3 Make MoA table
+#############################################
+
+merge_demand_results <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Get infile names
+	names(infiles) <- sapply(infiles, function(x) strsplit(basename(x), '__')[[1]][1])
+
+	# Make list of result MoA from DeMAND
+	demand_moa <- lapply(names(infiles), function(x) {load(infiles[x]);
+													  moa <- dobj@moa;
+													  moa[,1] <- e2s(moa[,1]);
+													  moa$comparison <- x;
+													  return(moa)})
+
+	# Concatenate results
+	moa_table <- do.call('rbind', demand_moa)
+
+	# Make MoA table
+	moa <- dcast(moaGene ~ comparison, data=moa_table, value.var='FDR', fill=1)
+
+	# Fix rownames
+	rownames(moa) <- moa$moaGene
+	moa$moaGene <- NULL
+
+	# Save results
+	save(moa, file=outfile)
+}
+
+#######################################################
+#######################################################
+########## 8. DU145 Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 8.1 Run msVIPER
+#############################################
+
+run_du145_msviper <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+	library(viper)
+
+	# Load infiles
+	load(infiles[1])
+	design_df <- tread(infiles[2])
+	load(infiles[3])
+
+	# Fix rownames	
+	rownames(vsd_df) <- s2e(rownames(vsd_df))
+
+	# Get conditions
+	conditions <- list(untreated=c('DU145-UNTREATED-6_DAYS', 'DU145-DMSO-6_DAYS'), treated=c('DU145-BICAL_10_uM-6_DAYS', 'DU145-ENZAL_1.0_uM-6_DAYS'))
+
+	# Get matrices
+	expmats <- sapply(conditions, function(x) { wells <- design_df[design_df$condition %in% x, 'well'];
+												mat <- vsd_df[,wells]
+												return(mat) })
+
+	# Run t-tests
+	sig <- rowTtest(x=expmats[[2]], y=expmats[[1]])
+	dnull <- ttestNull(x=expmats[[2]], y=expmats[[1]], per = 10000)
+
+	# Run msVIPER
+	good_genes <- rownames(dnull)[complete.cases(dnull)]
+	mra <- msviper(sig$statistic[good_genes,], regulon, dnull[good_genes,])
+	msviper_results <- msviperAnnot(mra, list_eg2symbol)
+
+	# Save
+	save(msviper_results, file=outfile)
+}
+
+#############################################
+########## 8.2 Run Differential Expression
+#############################################
+
+run_du145_differential_expression <- function(infiles, outfile)
+{
+	# Load libraries
+	library(limma)
+	library(edgeR)
+
+	# Load infiles
+	rawcount_mat <- tread(infiles[1], fixRowNames='gene_symbol', subColNames=c('.','-'))
+	design_df <- tread(infiles[2])
+
+	# Get conditions
+	conditions <- list(untreated=c('DU145-UNTREATED-6_DAYS', 'DU145-DMSO-6_DAYS'), treated=c('DU145-BICAL_10_uM-6_DAYS', 'DU145-ENZAL_1.0_uM-6_DAYS'))
+ 
+ 	# Get wells corresponding to the selected groups
+ 	well_list <- sapply(conditions, function(x) { design_df[design_df$condition %in% x, 'well'] })
+
+ 	# Get names list of wells
+ 	wells <- unlist(well_list)
+ 	names(wells) <- paste0('DU145_', gsub('[0-9]+', '', names(wells)))
+
+ 	# Subset matrix
+ 	rawcount_mat <- rawcount_mat[,unlist(wells)]
+
+ 	# Make design matrix
+ 	design <- model.matrix(~0+names(wells))
+
+ 	# Fix column names
+ 	colnames(design) <- sapply(colnames(design), function(x) strsplit(x, ')')[[1]][2])
+
+	# Create edgeR object
+	dge <- DGEList(counts=rawcount_mat)
+
+	# Calculate sample normalization factors
+	dge <- calcNormFactors(dge)
+
+	# Normalize with Voom
+	v <- voom(dge, design, plot=FALSE)
+
+	# Fit linear model
+	fit <- lmFit(v, design)
+
+	# Make contrast
+	contrast <- makeContrasts(contrasts='DU145_treated-DU145_untreated', levels=fit$design)
+
+	# Run differential expression
+	fit2 <- contrasts.fit(fit, contrast)
+	fit2 <- eBayes(fit2)
+
+	# Get differential expression result table
+	de_results_table <- topTable(fit2, n=nrow(fit2$t))
+
+	# Add bonferroni correction
+	de_results_table$bonferroni.P.Val <- p.adjust(de_results_table$P.Value, method='bonferroni')
+
+	# Save result
+	save(de_results_table, file=outfile)
+}
+
+#############################################
+########## 8.3 Run GSEA
+#############################################
+
+run_du145_enrichment <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load infiles
+	load(infiles[1])
+	load(infiles[2])
+
+	# Get NES and logFC for DU145
+	du145_results <- list(nes=msviper_results$es$nes, logfc=as.matrix(de_results_table)[,'logFC'])
+
+	# Fix names
+	du145_results <- sapply(du145_results, function(x) {names(x) <- s2e(names(x));
+													    return(x)})
+
+	# Get enrichment
+	gsea_results <- sapply(du145_results, function(x) compute_pathway_gsea(x))
+
+	# Save
+	save(gsea_results, file=outfile)
+}
+
+
+#############################################
+########## 8.4 Compare results
+#############################################
+
+run_du145_comparison <- function(infiles, outfile)
+{
+	# Load infiles
+	load(infiles[1])
+	load(infiles[2])
+	load(infiles[3])
+	load(infiles[4])
+
+	# Invert signs
+	nes_i <- -(nes)
+	logfc_i <- -(logfc)
+
+	# Get correlation method
+	method <- 'spearman'
+
+	# Get NES correlation
+	common_genes_nes <- intersect(names(du145_nes), rownames(nes_i))
+	nes_correlation <- sapply(colnames(nes_i), function(x) {cor.test(nes_i[common_genes_nes,x], du145_nes[common_genes_nes], method=method)$estimate})
+	names(nes_correlation) <- sapply(names(nes_correlation), function(x) strsplit(x, '.', fixed=TRUE)[[1]][1])
+
+	# Get logFC correlation
+	common_genes_logfc <- intersect(names(du145_logfc), rownames(logfc_i))
+	logfc_correlation <- sapply(colnames(logfc_i), function(x) {cor.test(logfc_i[common_genes_logfc,x], du145_logfc[common_genes_logfc], method=method)$estimate})
+	names(logfc_correlation) <- sapply(names(logfc_correlation), function(x) strsplit(x, '.', fixed=TRUE)[[1]][1])
+
+	# Get table
+	correlation_table <- data.frame(row.names=colnames(nes), viper=nes_correlation[colnames(nes)], de=logfc_correlation[colnames(nes)])
+
+	# Save outfile
+	save(correlation_table, file=outfile)
+}
+
+
+#######################################################
+#######################################################
+########## 9. Result Integration
+#######################################################
+#######################################################
+
+#############################################
+########## 9.1 Integrate Results
+#############################################
+
+run_score_integration <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load infiles
+	load(infiles[1])
+	load(infiles[2])
+	load(infiles[3])
+
+	# Get column
+	col <- 'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS'
+
+	# Get common genes
+	common_genes <- intersect(intersect(rownames(nes), rownames(logfc)), rownames(moa))
+
+	# Get result
+	result_table <- data.frame(row.names=common_genes,
+							   entrez_id = s2e(common_genes),
+							   logfc=logfc[common_genes,col],
+							   nes=nes[common_genes,col],
+							   moa=p2z(moa[common_genes,col]))
+
+	# Get combined Z
+	result_table$combined <- apply(result_table[,c('nes','moa')], 1, function(x) stouffer(x)*sign(x[1]))
+
+	# Filter for significance
+	result_table$selected <- abs(result_table$nes) > p2z(0.05) & result_table$moa > p2z(0.05)
+
+	# Get null
+	result_table$null <- abs(result_table$combined) < p2z(0.5)
+
+	# Sort
+	result_table <- result_table[order(abs(result_table$combined), decreasing=TRUE),]
+	
+	# Save results
+	twrite(result_table, outfile, rownames='gene_symbol')
+}
+
+#############################################
+########## 9.2 Get Modulator Null
+#############################################
+
+get_integrated_modulator_null <- function(infiles, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load infiles
+	load(infiles[1])
+	integration_results <- tread(infiles[2], fixRowNames='gene_symbol')
+
+	# Get prediction list
+	prediction <- ifelse(grepl('cindy', infiles[1]), 'cindy', 'preppi')
+	switch(prediction,
+		   'cindy' = {prediction_list <- prad_cindy_predictions},
+		   'preppi' = {prediction_list <- preppi_list})
+
+	# Convert names to Entrez IDs
+	rownames(integration_results) <- s2e(rownames(integration_results))
+
+	# Get resistance genes
+	integrated_geneset <- rownames(integration_results)[integration_results$selected]
+
+	# Get null pool
+	null_pool <- rownames(integration_results)[integration_results$null]
+
+	# Get real counts
+	real_counts <- sapply(prediction_list, function(x) length(intersect(x, integrated_geneset)))
+
+	# Get N
+	n <- as.numeric(strsplit(strsplit(outfile, '-')[[1]][4], '.', fixed=TRUE)[[1]][1])
+
+	# Get null counts
+	null_counts <- sapply(paste0('random_', 1:n),
+						  function(x) sapply(prediction_list,
+						  					 function(y) length(intersect(y, sample(null_pool, length(integrated_geneset))))))
+
+	# Make final table
+	null_table <- cbind(real=real_counts, null_counts)
+
+	# Save table
+	save(null_table, file=outfile)
+}
+
+#############################################
+########## 9.3 Get Top Modulators
+#############################################
+
+get_top_integrated_modulators <- function(infile, outfile)
+{
+	# Load libraries
+	library(citrus)
+
+	# Load data
+	load(infile)
+
+	# Calculate p-values for each modulator
+	pvalues <- apply(null_table, 1, function(x) (1+sum(x[-1] >= x[1])) / (length(x) + 1))
+
+	# Get median number of associated MRs in null
+	medians <- apply(null_table[,-1], 1, median)
+
+	# Get result table
+	modulator_table <- data.frame(entrez_id = rownames(null_table),
+								  gene_symbol = e2s(rownames(null_table)),
+								  associated_resistance_genes = null_table[,1],
+								  median_associated_random = medians,
+								  pvalue = pvalues,
+								  FDR = p.adjust(pvalues, method='BH'))
+
+	# Sort
+	modulator_table <- modulator_table[order(modulator_table$pvalue, -modulator_table$associated_resistance_genes),]
+
+	# Save table
+	twrite(modulator_table, outfile, sort='pvalue')
+}
+
+#######################################################
+#######################################################
+########## 10. Druggable Target Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 10.1 Get Druggable Genes
+#############################################
+
+get_druggable_genes <- function(infiles, outfile)
+{
+	# Set options
+	options(stringsAsFactors=FALSE)
+
+	# Load libraries
+	require(gdata)
+	require(citrus)
+
+	# Load infiles
+	rank_table <- tread(infiles[1])
+	druggable_target_db <- read.xls(infiles[2], sheet=1)
+
+	# Convert to character
+	druggable_target_db$gendID <- as.character(druggable_target_db$gendID)
+
+	# Add selection
+	if (!('selected' %in% colnames(rank_table)))
+		rank_table$selected <- rank_table$FDR < 0.05
+
+	# Get geneset
+	geneset <- as.character(rank_table[rank_table$selected, 'entrez_id'])
+
+	# Get target table
+	druggable_targets <- get_druggable_targets(geneset, druggable_target_db)
+
+	# Merge dataframes
+	merged_table <- merge(rank_table, druggable_targets, by=c('entrez_id', 'gene_symbol'))
+
+	# Sort
+	merged_table <- merged_table[order(merged_table$drugs, decreasing=TRUE),]
+
+	# Save result
+	twrite(merged_table, outfile)
+}
+
 
 #######################################################
 #######################################################

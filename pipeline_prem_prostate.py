@@ -391,6 +391,135 @@ def runDemand(infiles, outfile):
 
 	run('run_demand', infiles, outfile)
 
+#############################################
+########## 7.3 Make MoA table
+#############################################
+
+@merge(runDemand,
+	   'f7-demand.dir/prem_prostate-demand.rda')
+
+def mergeDemandResults(infiles, outfile):
+
+	run('merge_demand_results', infiles, outfile)
+
+#######################################################
+#######################################################
+########## 8. DU145 Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 8.1 Run msVIPER
+#############################################
+
+@follows(mkdir('f8-du145.dir'))
+
+@merge((vstRawcountTable, makeDesignTable, mergeSu2cRegulons),
+	   'f8-du145.dir/prem_prostate-du145_msviper.rda')
+
+def runDu145Msviper(infiles, outfile):
+
+	run('run_du145_msviper', infiles, outfile, mem='32G')
+
+#############################################
+########## 8.2 Run Differential Expression
+#############################################
+
+@merge((makeRawcountTable, makeDesignTable),
+	   'f8-du145.dir/prem_prostate-du145_logfc.rda')
+
+def runDu145DifferentialExpression(infiles, outfile):
+
+	run('run_du145_differential_expression', infiles, outfile)
+
+#############################################
+########## 8.3 Run GSEA
+#############################################
+
+@merge((runDu145Msviper, runDu145DifferentialExpression),
+	   'f8-du145.dir/prem_prostate-du145_enrichment.rda')
+
+def runDu145Enrichment(infiles, outfile):
+
+	run('run_du145_enrichment', infiles, outfile)
+
+#############################################
+########## 8.4 Compare results
+#############################################
+
+@merge((runDu145Msviper, runDu145DifferentialExpression, getNesTable, getLogfcTable),
+	   'f8-du145.dir/prem_prostate-du145_comparison.rda')
+
+def runDu145Comparison(infiles, outfile):
+
+	run('run_du145_comparison', infiles, outfile)
+
+#######################################################
+#######################################################
+########## 9. Result Integration
+#######################################################
+#######################################################
+
+#############################################
+########## 9.1 Integrate Results
+#############################################
+
+@follows(mkdir('f9-combined_results.dir'))
+
+@merge((getNesTable, getLogfcTable, mergeDemandResults),
+	   'f9-combined_results.dir/prem_prostate-combined_result_table.txt')
+
+def runScoreIntegration(infiles, outfile):
+
+	run('run_score_integration', infiles, outfile)
+
+#############################################
+########## 9.2 Get Modulator Null
+#############################################
+
+@follows(mkdir('f9-combined_results.dir/null'))
+
+@transform((preppiPredictions, cindyPredictions),
+		   regex(r'.*/(.*)-list.rda'),
+		   add_inputs(runScoreIntegration),
+		   r'f9-combined_results.dir/null/prem_prostate-combined_genes_\1_null-10000.rda')
+
+def getIntegratedModulatorNull(infiles, outfile):
+
+	run('get_integrated_modulator_null', infiles, outfile, mem='16G')
+
+#############################################
+########## 9.3 Get Top Modulators
+#############################################
+
+@transform(getIntegratedModulatorNull,
+		   regex(r'.*/null/(.*).rda'),
+		   r'f9-combined_results.dir/\1_predictions.txt')
+
+def getTopIntegratedModulators(infile, outfile):
+
+	run('get_top_integrated_modulators', infile, outfile)
+
+#######################################################
+#######################################################
+########## 10. Druggable Target Analysis
+#######################################################
+#######################################################
+
+#############################################
+########## 10.1 Get Druggable Genes
+#############################################
+
+@follows(mkdir('f10-druggable_targets.dir'))
+
+@transform(('f9-combined_results.dir/prem_prostate-combined_result_table.txt', 'f9-combined_results.dir/prem_prostate-combined_genes_prad_cindy_null-10000_predictions.txt'),
+	   	   regex(r'.*/(.*).txt'),
+	   	   add_inputs('f10-druggable_targets.dir/prab-drug_targets.xlsx'),
+	   	   r'f10-druggable_targets.dir/\1_druggable.txt')
+
+def getDruggableGenes(infiles, outfile):
+
+	run('get_druggable_genes', infiles, outfile)
 
 #######################################################
 #######################################################

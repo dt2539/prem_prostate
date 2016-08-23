@@ -47,7 +47,7 @@ get_table_xy <- function(n, ncol)
 #######################################################
 
 #############################################
-########## 2.2 (2.4) Get up/down sets
+########## 2.1 (2.4) Get up/down sets
 #############################################
 
 get_signed_genesets <- function(gene_score_table)
@@ -66,6 +66,43 @@ get_signed_genesets <- function(gene_score_table)
     # Return result
     return(signed_genesets)
 }
+
+#############################################
+########## 2.2 (S10) Get druggable targets
+#############################################
+
+get_druggable_targets <- function(genelist, druggable_target_db)
+{
+    # Load libraries
+    require(citrus)
+
+    # Get TF-to-drug list
+    drug_list <- sapply(unique(druggable_target_db$gendID), function(x) druggable_target_db[druggable_target_db$gendID==x, 'Drug'])
+
+    # Get drug counts
+    drug_counts <- sapply(drug_list, length)
+
+    # Get comma-separated drug list
+    comma_separated_drugs <- sapply(drug_list, function(x) paste(x, collapse=', '), simplify=FALSE)
+
+    # Get table
+    druggable_genes <- data.frame(entrez_id = genelist,
+                                  gene_symbol = e2s(genelist),
+                                  drugs = drug_counts[genelist])
+
+    # Add labels
+    druggable_genes$drug_labels <- sapply(druggable_genes$entrez_id, function(x) ifelse(x %in% names(comma_separated_drugs), comma_separated_drugs[[x]], ''))
+
+    # Replace NA with 0
+    druggable_genes[is.na(druggable_genes)] <- 0
+
+    # Sort
+    druggable_genes <- druggable_genes[order(druggable_genes$drugs, decreasing=TRUE),]
+
+    # Return result
+    return(druggable_genes)
+}
+
 
 
 #######################################################

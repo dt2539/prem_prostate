@@ -245,12 +245,13 @@ load(infiles[2])
 design_df <- design_df[design_df$drug != 'DMSO',]
 design_df <- design_df[design_df$group %in% c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'),]
 
-# Get subset of KLK3 and AR expression
-vsd_subset_melt <- melt(vsd_df[c('KLK3','AR','TP53'),])
-colnames(vsd_subset_melt) <- c('gene_symbol', 'well', 'vst_expression')
-
 # Replace KLK3 with PSA
-vsd_subset_melt$gene_symbol <- gsub('KLK3', 'PSA', vsd_subset_melt$gene_symbol)
+rownames(vsd_df) <- gsub('KLK3', 'PSA', rownames(vsd_df))
+
+# Get subset of KLK3 and AR expression
+genes <- c('PSA','AR')
+vsd_subset_melt <- melt(vsd_df[genes,])
+colnames(vsd_subset_melt) <- c('gene_symbol', 'well', 'vst_expression')
 
 # Merge with design
 merged_expression_df <- merge(vsd_subset_melt, design_df, by='well')
@@ -259,11 +260,11 @@ merged_expression_df <- merge(vsd_subset_melt, design_df, by='well')
 merged_expression_df$group <- factor(merged_expression_df$group, c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'))
 
 # Plot
-png(outfile, height=1500, width=600, pointsize=19)
+png(outfile, height=500, width=1000, pointsize=15)
 
-par(mfrow=c(3,1))
+par(mfrow=c(1,2))
 
-for (gene in c('AR','PSA','TP53'))
+for (gene in genes)
 {
 	# Get subset for plotting
 	plot_df <- merged_expression_df[merged_expression_df$gene_symbol == gene,]
@@ -272,7 +273,7 @@ for (gene in c('AR','PSA','TP53'))
 	boxplot(vst_expression ~ group, data=plot_df, main=gene, xaxt='n', ylab='Expression Level (VST)')
 
 	# Fix axis
-	axis(1, 1:4, c('Untreated', 'Residual\n(10 days)', 'Residual\n(27 days)', 'Resistant\n(27 days)'), padj=1)
+	axis(1, 1:4, c('Untreated', 'Residual\n(7 days)', 'Residual\n(27 days)', 'Resistant\n(27 days)'), padj=1)
 }
 
 dev.off()
@@ -368,7 +369,7 @@ dev.off()
 ### Input and output
 infiles <- c('f3-differential_expression.dir/prem_prostate-logfc_table.rda',
 		     '/ifs/data/c2b2/ac_lab/dt2539/projects/project_data/f1-genelists.dir/msigdb-genesets.rda')
-outfile <- 'plots/f1-androgen_independence_analysis/f5-mycn_gsea.png'
+outfile <- 'plots/f1-androgen_independence_analysis/f5-myc_gsea.png'
 
 ### Plot
 # Load libraries
@@ -390,13 +391,13 @@ gsea_results <- gsea(as.matrix(logfc)[,4], myc_targets, method='pareto')
 # Plot
 png(outfile, height=600, width=1000, pointsize=19)
 
-plot_gsea(gsea_results)
+plot_gsea(gsea_results, bottomYtitle='Differential Gene Expression Signature - Resistant vs. Residual', bottomYlabel='logFC', title='MYC Targets Geneset - MSigDB')
 
 dev.off()
 
 #############################################
 ########## 1.6 AR GSEA
-#############################################
+############################################# i will miss you very much
 
 ### Input and output
 infiles <- c('f3-differential_expression.dir/prem_prostate-logfc_table.rda',
@@ -423,17 +424,50 @@ gsea_results <- gsea(as.matrix(logfc)[,4], myc_targets, method='pareto')
 # Plot
 png(outfile, height=600, width=1000, pointsize=19)
 
-plot_gsea(gsea_results)
+plot_gsea(gsea_results, bottomYtitle='Differential Gene Expression Signature - Resistant vs. Residual', bottomYlabel='logFC', title='Androgen Response Geneset - MSigDB')
 
 dev.off()
 
 #############################################
-########## 1.7 FOXA1 - AR correlation
+########## 1.7 Smith Geneset GSEA
+#############################################
+
+### Input and output
+infiles <- c('f3-differential_expression.dir/prem_prostate-logfc_table.rda',
+		     'f9-ned.dir/smith_geneset.txt')
+outfile <- 'plots/f1-androgen_independence_analysis/f7-smith_gsea.png'
+
+### Plot
+# Load libraries
+library(citrus)
+
+# Load infile
+load(infiles[1])
+smith_geneset_table <- tread(infiles[2])
+
+# Convert rownames
+rownames(logfc) <- s2e(rownames(logfc))
+
+# Get geneset
+smith_geneset <- s2e(smith_geneset_table[smith_geneset_table$geneset=='cd49f_hi_dn', 'gene_symbol'])
+
+# Get GSEA
+gsea_results <- gsea(as.matrix(logfc)[,4], smith_geneset, method='pareto')
+
+# Plot
+png(outfile, height=600, width=1000, pointsize=19)
+
+plot_gsea(gsea_results, bottomYtitle='Differential Gene Expression Signature - Resistant vs. Residual', bottomYlabel='logFC', title='Basal Stem Cell Signature Geneset (Smith et al., PNAS 2015)')
+
+dev.off()
+
+#############################################
+########## 1.8 FOXA1 - AR correlation
 #############################################
 
 ### Input and Output
 infiles <- c('f1-data.dir/design_table.txt', 'f1-data.dir/prem_prostate-vst.rda')
-outfile <- 'plots/f1-androgen_independence_analysis/f6-ar_foxa1_cor.png'
+outfile <- 'plots/f1-androgen_independence_analysis/f8-ar_foxa1_cor.png'
 
 ### Plot
 # Load infiles
@@ -441,7 +475,7 @@ design_df <- tread(infiles[1])
 load(infiles[2])
 
 # Filter design dataframe by removing DMSO samples
-# design_df <- design_df[design_df$cell_line != 'DU145',]# %in% c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'),]
+design_df <- design_df[design_df$cell_line != 'DU145',]# %in% c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'),]
 # design_df <- design_df[design_df$group %in% c('LNCaP--10_DAYS', 'LNCaP_RESIDUAL--10_DAYS', 'LNCaP_RESIDUAL--27_DAYS', 'LNCaP_R-CLONES--27_DAYS'),]
 
 # Get wells
@@ -450,17 +484,21 @@ wells <- sapply(unique(design_df$cell_line), function(x) design_df[design_df$cel
 # Get expmats
 expmats <- sapply(wells, function(x) vsd_df[,x])
 
-# Plot
-png(outfile, height=300, width=1000)
+# Select genes
+gene1 <- 'AR'
+gene2 <- 'GATA2'
 
-par(mfrow=c(1,4))
+# Plot
+png(outfile, height=300, width=700, pointsize=13)
+
+par(mfrow=c(1,3))
 
 for (cond in names(expmats))
 {
-	x <- expmats[[cond]]['AR',]
-	y <- expmats[[cond]]['FOXA1',]
+	x <- expmats[[cond]][gene1,]
+	y <- expmats[[cond]][gene2,]
 
-	plot(x, y, xlab='AR', ylab=ifelse(cond==names(expmats)[1],'FOXA1',''), main=cond)
+	plot(x, y, xlab=gene1, ylab=ifelse(cond==names(expmats)[1],gene2,''), main=cond)
 
 	abline(lm(y~x))
 
@@ -471,12 +509,12 @@ for (cond in names(expmats))
 dev.off()
 
 #############################################
-########## 1.8 Resistant vs Residual NES
+########## 1.9 Resistant vs Residual NES
 #############################################
 
 ### Input and Output
 infile <- 'f5-pathway_enrichment.dir/prem_prostate-logfc_table_enrichment.rda'
-outfile <- 'plots/f1-androgen_independence_analysis/f7-de_nes.png'
+outfile <- 'plots/f1-androgen_independence_analysis/f9-de_nes.png'
 
 ### Plot
 # Load libraries
@@ -511,6 +549,170 @@ points(x=1:length(nes_colors), y=rep(1, length(nes_colors)), bg=nes_colors, pch=
 text(x=1:length(nes_colors)-0.1, y=rep(2, length(nes_colors)), labels=hallmark_labels, srt=45, adj=0, cex=1.3)
 
 hkey(nes.cmap, wh=which(nes.cmap$breaks %in% seq(-6, 6, by=3)), x=1, stretch=0.9)
+
+dev.off()
+
+#############################################
+########## 1.10 Druggable targets
+#############################################
+
+### Input and Output
+infiles <- c('f7-demand.dir/demand_runs/LNCaP--10_DAYSvLNCaP_RESIDUAL--10_DAYS__demand.rda', 'f7-demand.dir/demand_runs/LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS__demand.rda', 'f9-druggable_targets.dir/prab-drug_targets.xlsx')
+outfile <- 'plots/f1-androgen_independence_analysis/f10-druggable_targets.png'
+
+### Plot
+# Load libraries
+require(gdata)
+require(citrus)
+
+# Get infile names
+names(infiles) <- sapply(infiles, function(x) strsplit(basename(x), '__')[[1]][1])
+
+# Load infiles
+demand_results <- lapply(names(infiles)[1:2], function(x) {load(infiles[x]);
+														   moa <- dobj@moa;
+														   moa$comparison <- x;
+														   moa$Zscore <- p2z(moa$FDR);
+														   rownames(moa) <- e2s(moa[,1]);
+														   return(moa)})
+druggable_target_db <- read.xls(infiles[3], sheet=1)
+
+# Make demand table
+merged_demand_results <- do.call('rbind', demand_results)
+
+# Make MoA table
+moa <- dcast(moaGene ~ comparison, data=merged_demand_results, value.var='Zscore', fill=1)
+
+# Get count of drugs for each gene
+drug_counts <- table(druggable_target_db$gendID)
+
+# Add to dataframe
+moa$drugs <- sapply(as.character(moa$moaGene), function(x) ifelse(x %in% names(drug_counts), drug_counts[x], 0))
+
+# Get subset of genes with drugs
+moa_drug_subset <- subset(moa, drugs > 0)
+
+# Get subset of most significant genes
+moa_sig_subset <- moa_drug_subset[(moa_drug_subset[,2] > 5 & moa_drug_subset[,3] > 5 | apply(moa_drug_subset[,2:3], 1, max) > 7),]
+
+# Add gene symbol
+moa_sig_subset$gene_symbol <- e2s(moa_sig_subset$moaGene)
+
+# Filter
+moa_sig_subset <- moa_sig_subset[!moa_sig_subset$gene_symbol %in% c('ATP6V1A', 'PRDX5'),]
+
+# Plot
+png(outfile, height=1000, width=1000, pointsize=19)
+
+par(mar=c(5,5,4,2))
+
+plot(moa[,2:3], main='DeMAND-inferred dysregulation of regulatory interactions\nin LNCaP', xlab='Dysregulation associated with Enzalutamide treatment\n(Z-score)', ylab='Dysregulation associated with Resistance acquisition\n(Z-score)')
+
+points(moa_drug_subset[,2:3], col='red', pch=19)
+
+rect(moa_sig_subset[,2]+0.1, moa_sig_subset[,3]-0.25, moa_sig_subset[,2]+sqrt(nchar(moa_sig_subset[,5]))/1.25, moa_sig_subset[,3]+0.3, col='white', border=TRUE)
+
+text(x=moa_sig_subset[,2], y=moa_sig_subset[,3], labels=moa_sig_subset[,'gene_symbol'], col='red', pos=4, font=2)
+
+legend('topright', fill=c('red','black'), legend=c('Druggable','Other'))
+
+abline(h=p2z(0.01), lty=2)
+abline(v=p2z(0.01), lty=2)
+
+dev.off()
+
+#############################################
+########## 1.11 3E Plots
+#############################################
+
+### Input and Output
+infiles <- c('f2-msviper.dir/prem_prostate-msviper_table.rda', 'f3-differential_expression.dir/prem_prostate-logfc_table.rda', 'f7-demand.dir/prem_prostate-demand.rda')
+outfile <- 'plots/f1-androgen_independence_analysis/f11-3e_plot.png'
+
+### Plot
+# Load libraries
+library(citrus)
+
+# Load infiles
+load(infiles[1])
+load(infiles[2])
+load(infiles[3])
+
+# Invert signs
+nes <- nes
+logfc <- logfc
+
+# Get common genes
+common_genes <- intersect(intersect(rownames(nes), rownames(logfc)), rownames(moa))
+
+# Get comparison
+comparison <- 'LNCaP_R-CLONES--27_DAYSvLNCaP_RESIDUAL--27_DAYS'
+
+# Make table
+plot_table <- data.frame(row.names=common_genes, nes=nes[common_genes, comparison], logfc=logfc[common_genes, comparison], moa=p2z(moa[common_genes, comparison]))
+
+# Get color
+plot_table$color <- ifelse(plot_table$moa > p2z(0.01), 'red', 'black')
+
+# Plot
+png(outfile, height=1300, width=1300, pointsize=27)
+
+par(mar=c(5,5,4,2))
+
+x <- max(abs(plot_table$nes))
+y <- max(abs(plot_table$logfc))
+
+plot(plot_table$nes, plot_table$logfc, xlim=c(-x, x), ylim=c(-y, y), xlab='Inferred Protein Activity\n(msVIPER NES)', ylab='Differential Gene Expression\n(LogFC)', main='Analysis of Drug Resistance Signatures\nin Enzalutamide-resistant LNCaP')
+
+axis(2, at=-4:4)
+
+mtext('High Activity\nin Resistant', 1, at=3, padj=2, font=3)
+mtext('Low Activity\nin Resistant', 1, at=-3, padj=2, font=3)
+mtext('High Expression\nin Resistant', 2, at=4, padj=-1.5, font=3)
+mtext('Low Expression\nin Resistant', 2, at=-4, padj=-1.5, font=3)
+
+abline(v=p2z(0.05), lty=2)
+abline(v=-p2z(0.05), lty=2)
+abline(h=1, lty=2)
+abline(h=-1, lty=2)
+
+plot_subset <- plot_table[plot_table$color == 'red',]
+
+points(plot_subset$nes, plot_subset$logfc, col='red', pch=19)
+
+legend('topright', fill=c('red','black'), legend=c('Dysregulated','Other'), title='DeMAND Results')
+
+dev.off()
+
+#############################################
+########## 1.11 DU145 Comparison
+#############################################
+
+### Input and Output
+infiles <- c('f2-msviper.dir/msviper_runs/LNCaP--10_DAYSvLNCaP_RESIDUAL--27_DAYS.rda', 'f8-du145.dir/prem_prostate-du145_msviper.rda')
+outfile <- 'plots/f1-androgen_independence_analysis/f12-du145_comparison.png'
+
+### Plot
+# Get LNCaP results
+load(infiles[1])
+lncap <- msviper_results$es$nes
+
+# Get DU145 results
+load(infiles[2])
+du145 <- msviper_results$es$nes
+
+# Get common genes
+common_genes <- intersect(names(lncap), names(du145))
+
+# Fit linear model
+l <- lm(du145[common_genes]~lncap[common_genes])
+
+# Plot
+png(outfile, height=700, width=700, pointsize=15)
+
+plot(lncap[common_genes], du145[common_genes], main='Comparison of msVIPER Scores', xlab='LNCaP Resistant vs Residual', ylab='DU145 Treated vs Untreated')
+
+abline(l)
 
 dev.off()
 
